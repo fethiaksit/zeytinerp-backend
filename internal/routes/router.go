@@ -11,7 +11,7 @@ import (
 	"market-erp-backend/internal/middleware"
 )
 
-func SetupRouter(db *gorm.DB) *gin.Engine {
+func SetupRouter(db *gorm.DB, jwtSecret string) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), middleware.CORS())
 	router.NoRoute(handlers.EndpointNotFound)
@@ -20,6 +20,12 @@ func SetupRouter(db *gorm.DB) *gin.Engine {
 	router.GET("/health", handlers.Health)
 
 	api := router.Group("/api")
+	authHandler := handlers.NewAuthHandler(db, jwtSecret)
+	api.POST("/auth/login", authHandler.Login)
+
+	api.Use(middleware.AuthRequired(jwtSecret))
+	api.GET("/auth/me", authHandler.Me)
+
 	RegisterDashboardRoutes(api, db)
 	RegisterCashReportRoutes(api, db)
 	RegisterSupplierRoutes(api, db)

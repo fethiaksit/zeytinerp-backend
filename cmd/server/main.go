@@ -17,6 +17,13 @@ func main() {
 		log.Fatal("DATABASE_URL is required")
 	}
 	log.Println("DATABASE_URL okundu")
+	if cfg.JWTSecret == "" {
+		if cfg.AppEnv == "production" {
+			log.Fatal("JWT_SECRET is required in production")
+		}
+		cfg.JWTSecret = "development_jwt_secret_change_me"
+		log.Println("JWT_SECRET boş, development secret kullanılacak")
+	}
 
 	log.Println("db bağlantısı deneniyor")
 	dbCtx, cancelDB := context.WithTimeout(context.Background(), 5*time.Second)
@@ -27,7 +34,7 @@ func main() {
 	}
 	log.Println("db ping başarılı")
 
-	router := routes.SetupRouter(database)
+	router := routes.SetupRouter(database, cfg.JWTSecret)
 	routes.LogRoutes(router)
 
 	log.Println("migration başlıyor")

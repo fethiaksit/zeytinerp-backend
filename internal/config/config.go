@@ -10,6 +10,7 @@ type Config struct {
 	AppEnv      string
 	Port        string
 	DatabaseURL string
+	JWTSecret   string
 }
 
 func Load() Config {
@@ -19,6 +20,7 @@ func Load() Config {
 		AppEnv:      getEnv("APP_ENV", "development"),
 		Port:        getEnv("PORT", "8081"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
+		JWTSecret:   os.Getenv("JWT_SECRET"),
 	}
 }
 
