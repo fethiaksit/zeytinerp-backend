@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS stock_movements;
+DROP TABLE IF EXISTS products;
+DROP TABLE IF EXISTS income_entries;
+DROP TABLE IF EXISTS expenses;
+DROP TABLE IF EXISTS daily_cash_reports;
+DROP TABLE IF EXISTS employee_transactions;
+DROP TABLE IF EXISTS employees;
+DROP TABLE IF EXISTS supplier_transactions;
+DROP TABLE IF EXISTS suppliers;
