@@ -19,7 +19,7 @@ func AuthRequired(jwtSecret string) gin.HandlerFunc {
 
 		const prefix = "Bearer "
 		if !strings.HasPrefix(authHeader, prefix) {
-			authFail(c, "invalid authorization header")
+			authFail(c, "invalid or expired token")
 			return
 		}
 
@@ -31,7 +31,7 @@ func AuthRequired(jwtSecret string) gin.HandlerFunc {
 
 		claims, err := services.VerifyJWT(jwtSecret, token)
 		if err != nil {
-			authFail(c, "invalid token")
+			authFail(c, "invalid or expired token")
 			return
 		}
 

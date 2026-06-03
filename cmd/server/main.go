@@ -7,6 +7,7 @@ import (
 
 	"market-erp-backend/internal/config"
 	"market-erp-backend/internal/db"
+	"market-erp-backend/internal/middleware"
 	"market-erp-backend/internal/routes"
 )
 
@@ -24,6 +25,10 @@ func main() {
 		cfg.JWTSecret = "development_jwt_secret_change_me"
 		log.Println("JWT_SECRET boş, development secret kullanılacak")
 	}
+	if cfg.AppEnv == "production" && middleware.HasWildcardOrigin(cfg.CORSAllowedOrigins) {
+		log.Fatal("CORS_ALLOWED_ORIGINS cannot contain * in production")
+	}
+	log.Printf("CORS allowed origins: %v", cfg.CORSAllowedOrigins)
 
 	log.Println("db bağlantısı deneniyor")
 	dbCtx, cancelDB := context.WithTimeout(context.Background(), 5*time.Second)
@@ -34,7 +39,7 @@ func main() {
 	}
 	log.Println("db ping başarılı")
 
-	router := routes.SetupRouter(database, cfg.JWTSecret)
+	router := routes.SetupRouter(database, cfg.JWTSecret, cfg.CORSAllowedOrigins)
 	routes.LogRoutes(router)
 
 	log.Println("migration başlıyor")

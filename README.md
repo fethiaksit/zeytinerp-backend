@@ -48,9 +48,11 @@ APP_ENV=development
 PORT=8081
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/market_erp?sslmode=disable
 JWT_SECRET=change_this_secret
+CORS_ALLOWED_ORIGINS=http://zeytinerp.herevemarket.com,https://zeytinerp.herevemarket.com,http://localhost:5173
 ```
 
 Production ortamında `JWT_SECRET` boş bırakılamaz. Development ortamında boşsa geçici development secret kullanılır, fakat gerçek kullanımda `.env` içine güçlü bir değer yazılmalıdır.
+Production ortamında `CORS_ALLOWED_ORIGINS` içinde `*` kullanılmamalıdır; backend bunu reddeder.
 
 Bağımlılıkları indir:
 
@@ -68,6 +70,7 @@ psql "$DATABASE_URL" -f migrations/001_init.up.sql
 psql "$DATABASE_URL" -f migrations/002_financial_debts.up.sql
 psql "$DATABASE_URL" -f migrations/003_financial_installments_alerts.up.sql
 psql "$DATABASE_URL" -f migrations/004_users_auth.up.sql
+psql "$DATABASE_URL" -f migrations/005_supplier_transactions_current_account.up.sql
 ```
 
 Uygulama açılırken migration dosyalarını otomatik de çalıştırır.
@@ -84,7 +87,24 @@ Default admin:
 - Şifre: `123456`
 - Rol: `admin`
 
-Giriş örneği:
+Üretimde ilk girişten sonra default admin şifresi değiştirilmelidir.
+
+Token olmadan korumalı API testi:
+
+```bash
+curl http://localhost:8081/api/suppliers
+```
+
+Beklenen sonuç HTTP `401`:
+
+```json
+{
+  "success": false,
+  "error": "authorization token is required"
+}
+```
+
+Token al:
 
 ```bash
 curl -X POST http://localhost:8081/api/auth/login \
@@ -92,11 +112,11 @@ curl -X POST http://localhost:8081/api/auth/login \
   -d '{"username":"admin","password":"123456"}'
 ```
 
-Token ile istek örneği:
+Token ile istek:
 
 ```bash
-curl http://localhost:8081/api/dashboard \
-  -H "Authorization: Bearer JWT_TOKEN"
+curl http://localhost:8081/api/suppliers \
+  -H "Authorization: Bearer TOKEN"
 ```
 
 ## Endpointler

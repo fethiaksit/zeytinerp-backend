@@ -11,21 +11,24 @@ import (
 	"market-erp-backend/internal/middleware"
 )
 
-func SetupRouter(db *gorm.DB, jwtSecret string) *gin.Engine {
+func SetupRouter(db *gorm.DB, jwtSecret string, corsAllowedOrigins []string) *gin.Engine {
 	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery(), middleware.CORS())
+	router.Use(gin.Logger(), gin.Recovery(), middleware.CORS(corsAllowedOrigins))
 	router.NoRoute(handlers.EndpointNotFound)
 	router.NoMethod(handlers.EndpointNotFound)
 
-	router.GET("/health", handlers.Health)
+	authHandler := handlers.NewAuthHandler(db, jwtSecret)
+
+	public := router.Group("/")
+	public.GET("/health", handlers.Health)
+
+	auth := router.Group("/api/auth")
+	auth.POST("/login", authHandler.Login)
 
 	api := router.Group("/api")
-	authHandler := handlers.NewAuthHandler(db, jwtSecret)
-	api.POST("/auth/login", authHandler.Login)
-
 	api.Use(middleware.AuthRequired(jwtSecret))
-	api.GET("/auth/me", authHandler.Me)
 
+	api.GET("/auth/me", authHandler.Me)
 	RegisterDashboardRoutes(api, db)
 	RegisterCashReportRoutes(api, db)
 	RegisterSupplierRoutes(api, db)
@@ -50,6 +53,10 @@ func LogRoutes(router *gin.Engine) {
 		return registeredRoutes[i].Path < registeredRoutes[j].Path
 	})
 	for _, route := range registeredRoutes {
-		log.Printf("ROUTE %-7s %s", route.Method, route.Path)
+		visibility := "PROTECTED"
+		if route.Path == "/health" || route.Path == "/api/auth/login" {
+			visibility = "PUBLIC"
+		}
+		log.Printf("ROUTE %-9s %-7s %s", visibility, route.Method, route.Path)
 	}
 }
