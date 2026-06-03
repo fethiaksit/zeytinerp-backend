@@ -52,7 +52,7 @@ func (h *SupplierTransactionHandler) UploadFiles(c *gin.Context) {
 		return
 	}
 	if tx.Type != "invoice" {
-		fail(c, http.StatusBadRequest, "files can only be uploaded for invoice transactions")
+		fail(c, http.StatusBadRequest, "Fatura dosyası sadece Gelen Fatura hareketine eklenebilir")
 		return
 	}
 
