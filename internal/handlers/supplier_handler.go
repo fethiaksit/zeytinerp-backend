@@ -43,7 +43,12 @@ func (h *SupplierHandler) Create(c *gin.Context) {
 
 func (h *SupplierHandler) List(c *gin.Context) {
 	var suppliers []models.Supplier
-	if err := h.DB.Order("id desc").Find(&suppliers).Error; err != nil {
+	query := h.DB.Order("id desc")
+	if search := strings.TrimSpace(c.Query("search")); search != "" {
+		like := "%" + search + "%"
+		query = query.Where("name ILIKE ? OR phone ILIKE ? OR note ILIKE ?", like, like, like)
+	}
+	if err := query.Find(&suppliers).Error; err != nil {
 		handleDBError(c, err)
 		return
 	}

@@ -21,6 +21,14 @@ type EmployeeBalanceRow struct {
 	Balance    decimal.Decimal `json:"balance"`
 }
 
+const supplierBalanceCase = `
+	CASE
+		WHEN type IN ('invoice', 'purchase') THEN amount
+		WHEN type IN ('payment', 'return') THEN -amount
+		ELSE 0
+	END
+`
+
 func decimalFromQuery(db *gorm.DB, query string, args ...interface{}) (decimal.Decimal, error) {
 	var value string
 	if err := db.Raw(query, args...).Scan(&value).Error; err != nil {
@@ -38,7 +46,7 @@ func decimalFromQuery(db *gorm.DB, query string, args ...interface{}) (decimal.D
 
 func SupplierBalance(db *gorm.DB, supplierID uint) (decimal.Decimal, error) {
 	return decimalFromQuery(db, `
-		SELECT COALESCE(SUM(CASE WHEN type = 'purchase' THEN amount WHEN type = 'payment' THEN -amount ELSE 0 END), 0)::text
+		SELECT COALESCE(SUM(`+supplierBalanceCase+`), 0)::text
 		FROM supplier_transactions
 		WHERE supplier_id = ?
 	`, supplierID)
@@ -46,7 +54,7 @@ func SupplierBalance(db *gorm.DB, supplierID uint) (decimal.Decimal, error) {
 
 func TotalSupplierBalance(db *gorm.DB) (decimal.Decimal, error) {
 	return decimalFromQuery(db, `
-		SELECT COALESCE(SUM(CASE WHEN type = 'purchase' THEN amount WHEN type = 'payment' THEN -amount ELSE 0 END), 0)::text
+		SELECT COALESCE(SUM(`+supplierBalanceCase+`), 0)::text
 		FROM supplier_transactions
 	`)
 }
@@ -66,16 +74,16 @@ func SupplierBalances(db *gorm.DB) ([]SupplierBalanceRow, error) {
 			s.phone,
 			s.is_active,
 			COALESCE(SUM(CASE
-				WHEN st.type = 'purchase' THEN st.amount
-				WHEN st.type = 'payment' THEN -st.amount
+				WHEN st.type IN ('invoice', 'purchase') THEN st.amount
+				WHEN st.type IN ('payment', 'return') THEN -st.amount
 				ELSE 0
 			END), 0)::text AS balance
 		FROM suppliers s
 		LEFT JOIN supplier_transactions st ON st.supplier_id = s.id
 		GROUP BY s.id, s.name, s.phone, s.is_active
 		ORDER BY COALESCE(SUM(CASE
-			WHEN st.type = 'purchase' THEN st.amount
-			WHEN st.type = 'payment' THEN -st.amount
+			WHEN st.type IN ('invoice', 'purchase') THEN st.amount
+			WHEN st.type IN ('payment', 'return') THEN -st.amount
 			ELSE 0
 		END), 0) DESC, s.name ASC
 	`).Scan(&rows).Error

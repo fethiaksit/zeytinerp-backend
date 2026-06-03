@@ -14,6 +14,7 @@ type SupplierTransaction struct {
 	Amount          decimal.Decimal `json:"amount" gorm:"type:numeric(12,2);not null"`
 	PaymentMethod   string          `json:"payment_method"`
 	Note            string          `json:"note"`
+	InvoiceNo       string          `json:"invoice_no"`
 	CreatedAt       time.Time       `json:"created_at"`
 	Supplier        Supplier        `json:"-" gorm:"constraint:OnDelete:CASCADE"`
 }

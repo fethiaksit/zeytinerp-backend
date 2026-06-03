@@ -135,6 +135,7 @@ Firmalar:
 
 - `POST /api/suppliers`
 - `GET /api/suppliers`
+- `GET /api/suppliers?search=cola`
 - `GET /api/suppliers/:id`
 - `PUT /api/suppliers/:id`
 - `DELETE /api/suppliers/:id`
@@ -146,6 +147,7 @@ Firma hareketleri:
 - `POST /api/supplier-transactions`
 - `GET /api/supplier-transactions`
 - `GET /api/supplier-transactions?supplier_id=1`
+- `GET /api/supplier-transactions?supplier_id=1&type=invoice`
 - `DELETE /api/supplier-transactions/:id`
 
 Personel:
@@ -244,16 +246,16 @@ Firma:
 }
 ```
 
-Firma borç girişi:
+Firma gelen fatura:
 
 ```json
 {
   "supplier_id": 1,
-  "transaction_date": "2026-05-30",
-  "type": "purchase",
-  "amount": "12500.75",
-  "payment_method": "cash",
-  "note": "Haftalık mal alımı"
+  "transaction_date": "2026-06-03",
+  "type": "invoice",
+  "amount": "25000",
+  "invoice_no": "FTR-123",
+  "note": "Ürün faturası"
 }
 ```
 
@@ -262,11 +264,23 @@ Firmaya ödeme:
 ```json
 {
   "supplier_id": 1,
-  "transaction_date": "2026-05-30",
+  "transaction_date": "2026-06-03",
   "type": "payment",
-  "amount": "5000",
-  "payment_method": "bank",
-  "note": "Kısmi ödeme"
+  "amount": "10000",
+  "payment_method": "cash",
+  "note": "Nakit ödeme"
+}
+```
+
+Firma iade / fatura düşümü:
+
+```json
+{
+  "supplier_id": 1,
+  "transaction_date": "2026-06-03",
+  "type": "return",
+  "amount": "1500",
+  "note": "İade ürün düşümü"
 }
 ```
 
@@ -406,7 +420,9 @@ Finans borcu ödemesi:
 
 ## Hesap Mantığı
 
-- Firma borcu: `purchase toplamı - payment toplamı`
+- Firma borcu: `invoice ve eski purchase toplamı - payment toplamı - return toplamı`
+- Firma hareket tipleri: `invoice` gelen fatura, `payment` ödeme, `return` iade/fatura düşümü. Eski `purchase` kayıtları `invoice` gibi hesaplanır.
+- Firma ödeme yöntemleri: `cash`, `credit_card`, `current_account`, `bank_transfer`, `other`
 - Personel borcu: `(work_days toplamı x daily_wage) - payment toplamı - advance toplamı`
 - Günlük ciro: `cash_amount + pos_amount + qr_amount`
 - Dashboard gelirleri: günlük kasa cirosu + gelir kayıtları

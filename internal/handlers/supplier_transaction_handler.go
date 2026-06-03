@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -18,6 +19,7 @@ type supplierTransactionRequest struct {
 	Type            string          `json:"type"`
 	Amount          decimal.Decimal `json:"amount"`
 	PaymentMethod   string          `json:"payment_method"`
+	InvoiceNo       string          `json:"invoice_no"`
 	Note            string          `json:"note"`
 }
 
@@ -49,6 +51,9 @@ func (h *SupplierTransactionHandler) List(c *gin.Context) {
 	if supplierID := c.Query("supplier_id"); supplierID != "" {
 		query = query.Where("supplier_id = ?", supplierID)
 	}
+	if txType := strings.TrimSpace(c.Query("type")); txType != "" {
+		query = query.Where("type = ?", txType)
+	}
 	if err := query.Find(&txs).Error; err != nil {
 		handleDBError(c, err)
 		return
@@ -72,10 +77,20 @@ func (r supplierTransactionRequest) toModel() (models.SupplierTransaction, error
 	if r.SupplierID == 0 {
 		return models.SupplierTransaction{}, errRequired("supplier_id")
 	}
-	if !validateType(r.Type, map[string]bool{"purchase": true, "payment": true}) {
+	r.Type = strings.TrimSpace(r.Type)
+	if !validateType(r.Type, map[string]bool{
+		"invoice":  true,
+		"purchase": true,
+		"payment":  true,
+		"return":   true,
+	}) {
 		return models.SupplierTransaction{}, errInvalidType("type")
 	}
 	if err := positiveDecimal(r.Amount, "amount"); err != nil {
+		return models.SupplierTransaction{}, err
+	}
+	paymentMethod, err := normalizeSupplierPaymentMethod(r.PaymentMethod, r.Type)
+	if err != nil {
 		return models.SupplierTransaction{}, err
 	}
 	date, err := parseDate(r.TransactionDate)
@@ -87,7 +102,31 @@ func (r supplierTransactionRequest) toModel() (models.SupplierTransaction, error
 		TransactionDate: date,
 		Type:            r.Type,
 		Amount:          r.Amount,
-		PaymentMethod:   r.PaymentMethod,
-		Note:            r.Note,
+		PaymentMethod:   paymentMethod,
+		InvoiceNo:       strings.TrimSpace(r.InvoiceNo),
+		Note:            strings.TrimSpace(r.Note),
 	}, nil
+}
+
+func normalizeSupplierPaymentMethod(method, txType string) (string, error) {
+	method = strings.TrimSpace(method)
+	if method == "bank" {
+		method = "bank_transfer"
+	}
+	if txType == "payment" && method == "" {
+		return "", errRequired("payment_method")
+	}
+	if method == "" {
+		return "", nil
+	}
+	if !validateType(method, map[string]bool{
+		"cash":            true,
+		"credit_card":     true,
+		"current_account": true,
+		"bank_transfer":   true,
+		"other":           true,
+	}) {
+		return "", errInvalidType("payment_method")
+	}
+	return method, nil
 }
