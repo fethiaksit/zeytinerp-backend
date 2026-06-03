@@ -47,7 +47,9 @@ func (h *SupplierTransactionHandler) Create(c *gin.Context) {
 
 func (h *SupplierTransactionHandler) List(c *gin.Context) {
 	var txs []models.SupplierTransaction
-	query := h.DB.Order("transaction_date desc, id desc")
+	query := h.DB.Preload("Files", func(db *gorm.DB) *gorm.DB {
+		return db.Order("page_order asc, id asc")
+	}).Order("transaction_date desc, id desc")
 	if supplierID := c.Query("supplier_id"); supplierID != "" {
 		query = query.Where("supplier_id = ?", supplierID)
 	}
@@ -59,6 +61,21 @@ func (h *SupplierTransactionHandler) List(c *gin.Context) {
 		return
 	}
 	ok(c, txs)
+}
+
+func (h *SupplierTransactionHandler) Get(c *gin.Context) {
+	id, valid := parseID(c)
+	if !valid {
+		return
+	}
+	var tx models.SupplierTransaction
+	if err := h.DB.Preload("Files", func(db *gorm.DB) *gorm.DB {
+		return db.Order("page_order asc, id asc")
+	}).First(&tx, id).Error; err != nil {
+		handleDBError(c, err)
+		return
+	}
+	ok(c, tx)
 }
 
 func (h *SupplierTransactionHandler) Delete(c *gin.Context) {

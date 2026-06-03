@@ -71,6 +71,7 @@ psql "$DATABASE_URL" -f migrations/002_financial_debts.up.sql
 psql "$DATABASE_URL" -f migrations/003_financial_installments_alerts.up.sql
 psql "$DATABASE_URL" -f migrations/004_users_auth.up.sql
 psql "$DATABASE_URL" -f migrations/005_supplier_transactions_current_account.up.sql
+psql "$DATABASE_URL" -f migrations/006_supplier_transaction_files.up.sql
 ```
 
 Uygulama açılırken migration dosyalarını otomatik de çalıştırır.
@@ -168,7 +169,12 @@ Firma hareketleri:
 - `GET /api/supplier-transactions`
 - `GET /api/supplier-transactions?supplier_id=1`
 - `GET /api/supplier-transactions?supplier_id=1&type=invoice`
+- `GET /api/supplier-transactions/:id`
 - `DELETE /api/supplier-transactions/:id`
+- `POST /api/supplier-transactions/:id/files`
+- `GET /api/supplier-transactions/:id/files`
+- `DELETE /api/supplier-transaction-files/:file_id`
+- `GET /uploads/invoices/:file_name`
 
 Personel:
 
@@ -302,6 +308,36 @@ Firma iade / fatura düşümü:
   "amount": "1500",
   "note": "İade ürün düşümü"
 }
+```
+
+Firma faturası dosya yükleme:
+
+```bash
+curl -X POST http://localhost:8081/api/supplier-transactions/1/files \
+  -H "Authorization: Bearer TOKEN" \
+  -F "files=@/path/to/fatura-1.jpg" \
+  -F "files=@/path/to/fatura-2.pdf"
+```
+
+Firma faturası dosyalarını listeleme:
+
+```bash
+curl http://localhost:8081/api/supplier-transactions/1/files \
+  -H "Authorization: Bearer TOKEN"
+```
+
+Firma faturası dosyası silme:
+
+```bash
+curl -X DELETE http://localhost:8081/api/supplier-transaction-files/1 \
+  -H "Authorization: Bearer TOKEN"
+```
+
+Fatura dosyasını görüntüleme:
+
+```bash
+curl http://localhost:8081/uploads/invoices/DOSYA_ADI.pdf \
+  -H "Authorization: Bearer TOKEN"
 ```
 
 Personel:

@@ -41,6 +41,10 @@ func SetupRouter(db *gorm.DB, jwtSecret string, corsAllowedOrigins []string) *gi
 	RegisterProductRoutes(api, db)
 	RegisterStockMovementRoutes(api, db)
 
+	uploads := router.Group("/uploads")
+	uploads.Use(middleware.AuthRequired(jwtSecret))
+	uploads.GET("/invoices/*filepath", handlers.ServeInvoiceFile)
+
 	return router
 }
 
