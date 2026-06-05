@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -41,17 +42,22 @@ var allowedInvoiceExts = map[string]bool{
 }
 
 func (h *SupplierTransactionHandler) UploadFiles(c *gin.Context) {
+	log.Println("UPLOAD START")
 	transactionID, valid := parseID(c)
 	if !valid {
+		log.Println("UPLOAD ERROR: invalid transaction id")
 		return
 	}
+	log.Printf("TRANSACTION ID: %d", transactionID)
 
 	var tx models.SupplierTransaction
 	if err := h.DB.First(&tx, transactionID).Error; err != nil {
+		log.Printf("UPLOAD ERROR: transaction lookup failed: %v", err)
 		handleDBError(c, err)
 		return
 	}
 	if tx.Type != "invoice" {
+		log.Printf("UPLOAD ERROR: transaction %d type is %s", transactionID, tx.Type)
 		fail(c, http.StatusBadRequest, "Fatura dosyası sadece Gelen Fatura hareketine eklenebilir")
 		return
 	}
@@ -59,15 +65,25 @@ func (h *SupplierTransactionHandler) UploadFiles(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxInvoiceUploadSize)
 	form, err := c.MultipartForm()
 	if err != nil {
+		log.Printf("UPLOAD ERROR: multipart parse failed: %v", err)
 		fail(c, http.StatusBadRequest, "invalid multipart form")
 		return
 	}
 	files := form.File["files"]
+	log.Printf("FILES COUNT: %d", len(files))
 	if len(files) == 0 {
+		log.Println("UPLOAD ERROR: files field is empty")
 		fail(c, http.StatusBadRequest, errRequired("files").Error())
 		return
 	}
-	if err := os.MkdirAll(invoiceUploadDir, 0755); err != nil {
+	uploadDir, err := invoiceUploadDirPath()
+	if err != nil {
+		log.Printf("UPLOAD ERROR: upload path failed: %v", err)
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		log.Printf("UPLOAD ERROR: mkdir failed: %v", err)
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -77,6 +93,7 @@ func (h *SupplierTransactionHandler) UploadFiles(c *gin.Context) {
 		Where("supplier_transaction_id = ?", transactionID).
 		Select("COALESCE(MAX(page_order), 0)").
 		Scan(&maxPageOrder).Error; err != nil {
+		log.Printf("UPLOAD ERROR: max page query failed: %v", err)
 		handleDBError(c, err)
 		return
 	}
@@ -86,18 +103,21 @@ func (h *SupplierTransactionHandler) UploadFiles(c *gin.Context) {
 	for i, fileHeader := range files {
 		mimeType, ext, err := validateInvoiceUpload(fileHeader)
 		if err != nil {
+			log.Printf("UPLOAD ERROR: validation failed for %s: %v", fileHeader.Filename, err)
 			cleanupFiles(savedPaths)
 			fail(c, http.StatusBadRequest, err.Error())
 			return
 		}
 
 		storedName := newUUID() + ext
-		filePath := filepath.Join(invoiceUploadDir, storedName)
+		filePath := filepath.Join(uploadDir, storedName)
 		if err := c.SaveUploadedFile(fileHeader, filePath); err != nil {
+			log.Printf("UPLOAD ERROR: save failed for %s: %v", fileHeader.Filename, err)
 			cleanupFiles(savedPaths)
 			fail(c, http.StatusInternalServerError, err.Error())
 			return
 		}
+		log.Printf("SAVED FILE: %s", filePath)
 		savedPaths = append(savedPaths, filePath)
 
 		records = append(records, models.SupplierTransactionFile{
@@ -112,9 +132,13 @@ func (h *SupplierTransactionHandler) UploadFiles(c *gin.Context) {
 	}
 
 	if err := h.DB.Create(&records).Error; err != nil {
+		log.Printf("UPLOAD ERROR: db create failed: %v", err)
 		cleanupFiles(savedPaths)
 		handleDBError(c, err)
 		return
+	}
+	for _, record := range records {
+		log.Printf("DB RECORD CREATED: supplier_transaction_file_id=%d file_url=%s", record.ID, record.FileURL)
 	}
 	created(c, records)
 }
@@ -175,7 +199,12 @@ func ServeInvoiceFile(c *gin.Context) {
 		return
 	}
 
-	fullPath := filepath.Join(invoiceUploadDir, requested)
+	uploadDir, err := invoiceUploadDirPath()
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	fullPath := filepath.Join(uploadDir, requested)
 	if _, err := os.Stat(fullPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			fail(c, http.StatusNotFound, "file not found")
@@ -185,6 +214,10 @@ func ServeInvoiceFile(c *gin.Context) {
 		return
 	}
 	c.File(fullPath)
+}
+
+func invoiceUploadDirPath() (string, error) {
+	return filepath.Abs(invoiceUploadDir)
 }
 
 func validateInvoiceUpload(fileHeader *multipart.FileHeader) (string, string, error) {
