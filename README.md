@@ -72,6 +72,7 @@ psql "$DATABASE_URL" -f migrations/003_financial_installments_alerts.up.sql
 psql "$DATABASE_URL" -f migrations/004_users_auth.up.sql
 psql "$DATABASE_URL" -f migrations/005_supplier_transactions_current_account.up.sql
 psql "$DATABASE_URL" -f migrations/006_supplier_transaction_files.up.sql
+psql "$DATABASE_URL" -f migrations/007_bank_wallet.up.sql
 ```
 
 Uygulama açılırken migration dosyalarını otomatik de çalıştırır.
@@ -146,6 +147,7 @@ Raporlar:
 Dashboard finans alanları:
 
 - `total_financial_debt`
+- `total_bank_balance`
 - `monthly_financial_due`
 - `overdue_financial_count`
 - `upcoming_financial_due_7_days`
@@ -246,6 +248,20 @@ Finans borç ödemeleri:
 Finans uyarıları:
 
 - `GET /api/financial-alerts`
+
+Banka cüzdanı:
+
+- `GET /api/bank-accounts`
+- `POST /api/bank-accounts`
+- `GET /api/bank-accounts/:id`
+- `PUT /api/bank-accounts/:id`
+- `DELETE /api/bank-accounts/:id`
+- `GET /api/bank-accounts/:id/transactions`
+- `POST /api/bank-accounts/:id/transactions`
+- `DELETE /api/bank-transactions/:id`
+- `GET /api/bank-wallet/summary`
+- `GET /api/bank-wallet/daily-summary?date=2026-06-09`
+- `GET /api/bank-wallet/monthly-summary?month=2026-06`
 
 Ürün/stok modülü:
 
@@ -474,6 +490,48 @@ Finans borcu ödemesi:
 }
 ```
 
+Banka hesabı:
+
+```json
+{
+  "account_name": "Ana Banka Hesabı",
+  "bank_name": "Garanti",
+  "iban": "",
+  "opening_balance": "20000"
+}
+```
+
+Banka hareketi:
+
+```json
+{
+  "transaction_date": "2026-06-09",
+  "transaction_type": "pos_income",
+  "amount": "10000",
+  "title": "POS Yatışı",
+  "description": "08.06 POS ertesi gün hesaba geçti"
+}
+```
+
+Banka cüzdanı özet cevabı:
+
+```json
+{
+  "total_balance": "30000",
+  "accounts": [
+    {
+      "id": 1,
+      "account_name": "Ana Banka",
+      "bank_name": "Garanti",
+      "current_balance": "30000"
+    }
+  ],
+  "today_income": "15000",
+  "today_outcome": "10000",
+  "today_net": "5000"
+}
+```
+
 ## Hesap Mantığı
 
 - Firma borcu: `invoice ve eski purchase toplamı - payment toplamı - return toplamı`
@@ -488,4 +546,7 @@ Finans borcu ödemesi:
 - `paid_amount > 0` ve `amount` değerinden küçükse taksit `partial_paid` olur
 - `due_date < today` ve tam ödenmemişse taksit `overdue` olur
 - Yaklaşan finans taksitleri: önümüzdeki 30 gün içinde vadesi gelen ödenmemiş taksitler
+- Banka hareketlerinde `cash_deposit`, `pos_income`, `bank_income`, `transfer_in` bakiyeyi artırır; `payment`, `expense`, `transfer_out` bakiyeyi azaltır.
+- Banka `correction` hareketinde tutar pozitifse bakiye artar, negatifse azalır.
+- Banka hareketi silinirse hesabın `current_balance` ve hareketlerin `balance_after` değerleri tüm hareketlerden tekrar hesaplanır.
 - Net: `gelir - gider`
