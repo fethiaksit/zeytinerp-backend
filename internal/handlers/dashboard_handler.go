@@ -176,6 +176,10 @@ func (h *DashboardHandler) dashboardData(todayStart, todayEnd, monthStart, month
 	if err != nil {
 		return nil, err
 	}
+	walletBalance, err := services.WalletCurrentBalance(h.DB)
+	if err != nil {
+		return nil, err
+	}
 	totalBankBalance, err := services.TotalBankBalance(h.DB)
 	if err != nil {
 		return nil, err
@@ -233,6 +237,7 @@ func (h *DashboardHandler) dashboardData(todayStart, todayEnd, monthStart, month
 		"total_supplier_debt":            supplierDebt,
 		"total_employee_debt":            employeeDebt,
 		"total_financial_debt":           financialDebt,
+		"wallet_balance":                 walletBalance,
 		"total_bank_balance":             totalBankBalance,
 		"monthly_financial_due":          monthlyFinancialDue,
 		"overdue_financial_count":        overdueFinancialCount,
@@ -260,6 +265,7 @@ func reportSummary(data gin.H) gin.H {
 		"total_supplier_debt":     data["total_supplier_debt"],
 		"total_employee_debt":     data["total_employee_debt"],
 		"total_financial_debt":    data["total_financial_debt"],
+		"wallet_balance":          data["wallet_balance"],
 		"total_bank_balance":      data["total_bank_balance"],
 		"monthly_financial_due":   data["monthly_financial_due"],
 		"overdue_financial_count": data["overdue_financial_count"],

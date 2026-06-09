@@ -73,6 +73,7 @@ psql "$DATABASE_URL" -f migrations/004_users_auth.up.sql
 psql "$DATABASE_URL" -f migrations/005_supplier_transactions_current_account.up.sql
 psql "$DATABASE_URL" -f migrations/006_supplier_transaction_files.up.sql
 psql "$DATABASE_URL" -f migrations/007_bank_wallet.up.sql
+psql "$DATABASE_URL" -f migrations/008_wallet.up.sql
 ```
 
 Uygulama açılırken migration dosyalarını otomatik de çalıştırır.
@@ -148,6 +149,7 @@ Dashboard finans alanları:
 
 - `total_financial_debt`
 - `total_bank_balance`
+- `wallet_balance`
 - `monthly_financial_due`
 - `overdue_financial_count`
 - `upcoming_financial_due_7_days`
@@ -248,6 +250,13 @@ Finans borç ödemeleri:
 Finans uyarıları:
 
 - `GET /api/financial-alerts`
+
+Cüzdan:
+
+- `GET /api/wallet/summary`
+- `GET /api/wallet/transactions`
+- `POST /api/wallet/transactions`
+- `DELETE /api/wallet/transactions/:id`
 
 Banka cüzdanı:
 
@@ -532,6 +541,30 @@ Banka cüzdanı özet cevabı:
 }
 ```
 
+Cüzdan hareketi:
+
+```json
+{
+  "transaction_date": "2026-06-10",
+  "transaction_type": "cash_income",
+  "amount": "10000",
+  "title": "Nakit Gelir",
+  "description": "Gün sonu kasa girişi"
+}
+```
+
+Cüzdan açılış bakiyesi:
+
+```json
+{
+  "transaction_date": "2026-06-10",
+  "transaction_type": "opening_balance",
+  "amount": "20000",
+  "title": "Açılış Bakiyesi",
+  "description": "Cüzdan başlangıç bakiyesi"
+}
+```
+
 ## Hesap Mantığı
 
 - Firma borcu: `invoice ve eski purchase toplamı - payment toplamı - return toplamı`
@@ -549,4 +582,8 @@ Banka cüzdanı özet cevabı:
 - Banka hareketlerinde `cash_deposit`, `pos_income`, `bank_income`, `transfer_in` bakiyeyi artırır; `payment`, `expense`, `transfer_out` bakiyeyi azaltır.
 - Banka `correction` hareketinde tutar pozitifse bakiye artar, negatifse azalır.
 - Banka hareketi silinirse hesabın `current_balance` ve hareketlerin `balance_after` değerleri tüm hareketlerden tekrar hesaplanır.
+- Cüzdan bakiyesi tüm geçmiş `wallet_transactions` hareketlerinden hesaplanır ve gün değişince sıfırlanmaz.
+- Cüzdan girişleri: `opening_balance`, `cash_income`, `cash_sale`, `pos_income`, `bank_income`, `cash_deposit`
+- Cüzdan çıkışları: `payment`, `expense`, `cash_withdraw`
+- Cüzdan `correction` hareketinde tutar pozitifse bakiye artar, negatifse azalır.
 - Net: `gelir - gider`
