@@ -73,6 +73,9 @@ func (h *SupplierTransactionHandler) Create(c *gin.Context) {
 				return err
 			}
 			tx.Files = records
+			if err := syncSupplierTransactionPrimaryFile(dbtx, &tx); err != nil {
+				return err
+			}
 			return nil
 		}); err != nil {
 			log.Printf("[SupplierTransaction Error] create with files failed: %v", err)
@@ -152,6 +155,12 @@ func (h *SupplierTransactionHandler) Update(c *gin.Context) {
 	}
 	updatedTx.ID = existing.ID
 	updatedTx.CreatedAt = existing.CreatedAt
+	updatedTx.ImageURL = existing.ImageURL
+	updatedTx.FilePath = existing.FilePath
+	if !supplierTransactionUsesPrimaryFile(updatedTx.Type) {
+		updatedTx.ImageURL = ""
+		updatedTx.FilePath = ""
+	}
 
 	pathsToRemove := make([]string, 0)
 	if err := h.DB.Transaction(func(dbtx *gorm.DB) error {
@@ -187,6 +196,11 @@ func (h *SupplierTransactionHandler) Update(c *gin.Context) {
 				return err
 			}
 		}
+		if len(files) > 0 || replaceFiles || deleteAllFiles || len(deleteFileIDs) > 0 || updatedTx.Type != existing.Type {
+			if err := syncSupplierTransactionPrimaryFile(dbtx, &updatedTx); err != nil {
+				return err
+			}
+		}
 		return nil
 	}); err != nil {
 		handleSupplierTransactionFileError(c, err)
@@ -215,6 +229,9 @@ func (h *SupplierTransactionHandler) Delete(c *gin.Context) {
 		return
 	}
 	filePaths := supplierTransactionFilePaths(tx.Files)
+	if strings.TrimSpace(tx.FilePath) != "" {
+		filePaths = append(filePaths, tx.FilePath)
+	}
 	if err := h.DB.Delete(&models.SupplierTransaction{}, id).Error; err != nil {
 		handleDBError(c, err)
 		return
@@ -388,8 +405,7 @@ func bindSupplierTransactionRequest(c *gin.Context) (supplierTransactionRequest,
 		return supplierTransactionRequest{}, nil, err
 	}
 
-	files := append([]*multipart.FileHeader{}, form.File["files"]...)
-	files = append(files, form.File["file"]...)
+	files := supplierTransactionUploadFilesFromForm(form.File)
 	req := supplierTransactionRequest{
 		SupplierID:      supplierID,
 		TransactionDate: c.PostForm("transaction_date"),

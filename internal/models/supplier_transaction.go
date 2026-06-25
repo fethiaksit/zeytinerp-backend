@@ -19,6 +19,8 @@ type SupplierTransaction struct {
 	PaymentMethod   string                    `json:"payment_method"`
 	Note            string                    `json:"note"`
 	InvoiceNo       string                    `json:"invoice_no"`
+	ImageURL        string                    `json:"image_url"`
+	FilePath        string                    `json:"file_path"`
 	CreatedAt       time.Time                 `json:"created_at"`
 	Supplier        Supplier                  `json:"-" gorm:"constraint:OnDelete:CASCADE"`
 	Files           []SupplierTransactionFile `json:"files,omitempty" gorm:"foreignKey:SupplierTransactionID;constraint:OnDelete:CASCADE"`

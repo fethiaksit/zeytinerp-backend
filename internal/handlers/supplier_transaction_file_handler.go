@@ -78,7 +78,7 @@ func (h *SupplierTransactionHandler) UploadFiles(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "invalid multipart form")
 		return
 	}
-	files := form.File["files"]
+	files := supplierTransactionUploadFilesFromForm(form.File)
 	log.Printf("FILES COUNT: %d", len(files))
 	if len(files) == 0 {
 		log.Println("UPLOAD ERROR: files field is empty")
@@ -89,6 +89,10 @@ func (h *SupplierTransactionHandler) UploadFiles(c *gin.Context) {
 	records, err := h.saveSupplierTransactionFiles(c, h.DB, transactionID, files)
 	if err != nil {
 		handleSupplierTransactionFileError(c, err)
+		return
+	}
+	if err := syncSupplierTransactionPrimaryFile(h.DB, &tx); err != nil {
+		handleDBError(c, err)
 		return
 	}
 	created(c, records)
@@ -156,6 +160,16 @@ func (h *SupplierTransactionHandler) saveSupplierTransactionFiles(c *gin.Context
 	return records, nil
 }
 
+func supplierTransactionUploadFilesFromForm(formFiles map[string][]*multipart.FileHeader) []*multipart.FileHeader {
+	files := append([]*multipart.FileHeader{}, formFiles["files"]...)
+	files = append(files, formFiles["file"]...)
+	files = append(files, formFiles["image"]...)
+	files = append(files, formFiles["image_file"]...)
+	files = append(files, formFiles["receipt"]...)
+	files = append(files, formFiles["document"]...)
+	return files
+}
+
 func (h *SupplierTransactionHandler) ListFiles(c *gin.Context) {
 	transactionID, valid := parseID(c)
 	if !valid {
@@ -188,9 +202,17 @@ func (h *SupplierTransactionHandler) DeleteFile(c *gin.Context) {
 		handleDBError(c, err)
 		return
 	}
+	var txRecord models.SupplierTransaction
+	if err := h.DB.First(&txRecord, file.SupplierTransactionID).Error; err != nil {
+		handleDBError(c, err)
+		return
+	}
 
 	err := h.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Delete(&models.SupplierTransactionFile{}, fileID).Error; err != nil {
+			return err
+		}
+		if err := syncSupplierTransactionPrimaryFile(tx, &txRecord); err != nil {
 			return err
 		}
 		if err := os.Remove(file.FilePath); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -214,8 +236,57 @@ func supplierTransactionAllowsFiles(txType string) bool {
 	}
 }
 
+func supplierTransactionUsesPrimaryFile(txType string) bool {
+	switch txType {
+	case "payment", "return":
+		return true
+	default:
+		return false
+	}
+}
+
 func supplierTransactionFileTypeError() string {
 	return "Dosya sadece Gelen Fatura, Ödeme veya İade/Fatura Düşümü hareketine eklenebilir"
+}
+
+func syncSupplierTransactionPrimaryFile(db *gorm.DB, tx *models.SupplierTransaction) error {
+	if !supplierTransactionUsesPrimaryFile(tx.Type) {
+		tx.ImageURL = ""
+		tx.FilePath = ""
+		return db.Model(&models.SupplierTransaction{}).
+			Where("id = ?", tx.ID).
+			Updates(map[string]interface{}{
+				"image_url": "",
+				"file_path": "",
+			}).Error
+	}
+
+	var file models.SupplierTransactionFile
+	err := db.Where("supplier_transaction_id = ?", tx.ID).
+		Order("page_order asc, id asc").
+		First(&file).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			tx.ImageURL = ""
+			tx.FilePath = ""
+			return db.Model(&models.SupplierTransaction{}).
+				Where("id = ?", tx.ID).
+				Updates(map[string]interface{}{
+					"image_url": "",
+					"file_path": "",
+				}).Error
+		}
+		return err
+	}
+
+	tx.ImageURL = file.FileURL
+	tx.FilePath = file.FilePath
+	return db.Model(&models.SupplierTransaction{}).
+		Where("id = ?", tx.ID).
+		Updates(map[string]interface{}{
+			"image_url": file.FileURL,
+			"file_path": file.FilePath,
+		}).Error
 }
 
 func newSupplierTransactionFileError(status int, message string) error {

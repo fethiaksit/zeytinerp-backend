@@ -74,6 +74,9 @@ psql "$DATABASE_URL" -f migrations/005_supplier_transactions_current_account.up.
 psql "$DATABASE_URL" -f migrations/006_supplier_transaction_files.up.sql
 psql "$DATABASE_URL" -f migrations/007_bank_wallet.up.sql
 psql "$DATABASE_URL" -f migrations/008_wallet.up.sql
+psql "$DATABASE_URL" -f migrations/009_finance_center_indexes.up.sql
+psql "$DATABASE_URL" -f migrations/010_supplier_transaction_currencies.up.sql
+psql "$DATABASE_URL" -f migrations/011_supplier_transaction_payment_return_files.up.sql
 ```
 
 Uygulama açılırken migration dosyalarını otomatik de çalıştırır.
@@ -380,7 +383,7 @@ curl -X POST http://localhost:8081/api/supplier-transactions/1/files \
   -F "files=@/path/to/fatura-2.pdf"
 ```
 
-`invoice`, `payment` ve `return` hareketlerine JPG, JPEG, PNG, WEBP veya PDF dosyası eklenebilir. Aynı dosya alanı, ödeme makbuzu/dekont ve iade faturası evrakı için de kullanılır.
+`invoice`, `payment` ve `return` hareketlerine JPG, JPEG, PNG, WEBP veya PDF dosyası eklenebilir. Aynı dosya alanı, ödeme makbuzu/dekont ve iade faturası evrakı için de kullanılır. `payment` ve `return` kayıtlarında ilk ilişkili dosya ayrıca hareket cevabındaki `image_url` ve `file_path` alanlarına yazılır.
 
 Firma hareketi oluştururken dosya ekleme:
 
