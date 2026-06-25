@@ -1,0 +1,4 @@
+DROP INDEX IF EXISTS idx_financial_debt_installments_debt_due;
+DROP INDEX IF EXISTS idx_financial_debt_payments_date_debt;
+DROP INDEX IF EXISTS idx_employee_transactions_type_date;
+DROP INDEX IF EXISTS idx_supplier_transactions_type_date;
