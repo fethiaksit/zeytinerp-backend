@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -52,13 +53,7 @@ func TestParseDateRange(t *testing.T) {
 }
 
 func TestApplyDateRangeUsesBetweenForFullRange(t *testing.T) {
-	db, err := gorm.Open(postgres.New(postgres.Config{DSN: "host=localhost"}), &gorm.Config{
-		DryRun:               true,
-		DisableAutomaticPing: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := newDryRunDB(t)
 
 	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
@@ -71,6 +66,51 @@ func TestApplyDateRangeUsesBetweenForFullRange(t *testing.T) {
 	if sql := statement.SQL.String(); !strings.Contains(sql, "expense_date BETWEEN $1 AND $2") {
 		t.Fatalf("query does not use BETWEEN: %s", sql)
 	}
+}
+
+func TestListAndTotalQueriesAreIndependent(t *testing.T) {
+	db := newDryRunDB(t)
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
+	dateRange := dateRange{start: &start, end: &end}
+
+	var expenses []models.Expense
+	listStatement := applyDateRange(db.Model(&models.Expense{}), "expense_date", dateRange).
+		Order("expense_date desc, id desc").
+		Find(&expenses).Statement
+
+	var total decimal.Decimal
+	totalStatement := applyDateRange(db.Model(&models.Expense{}), "expense_date", dateRange).
+		Select("COALESCE(SUM(amount), 0)").
+		Scan(&total).Statement
+
+	listSQL := listStatement.SQL.String()
+	if strings.Contains(listSQL, "SUM(") {
+		t.Fatalf("list query contains aggregate: %s", listSQL)
+	}
+	if !strings.Contains(listSQL, "ORDER BY expense_date desc, id desc") {
+		t.Fatalf("list query lost its ordering: %s", listSQL)
+	}
+
+	totalSQL := totalStatement.SQL.String()
+	if !strings.Contains(totalSQL, "SUM(amount)") {
+		t.Fatalf("total query does not contain aggregate: %s", totalSQL)
+	}
+	if strings.Contains(totalSQL, "ORDER BY") {
+		t.Fatalf("total query contains list ordering: %s", totalSQL)
+	}
+}
+
+func newDryRunDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(postgres.New(postgres.Config{DSN: "host=localhost"}), &gorm.Config{
+		DryRun:               true,
+		DisableAutomaticPing: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return db
 }
 
 func assertOptionalDate(t *testing.T, field string, actual *time.Time, expected string) {

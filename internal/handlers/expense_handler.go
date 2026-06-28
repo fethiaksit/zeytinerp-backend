@@ -47,18 +47,20 @@ func (h *ExpenseHandler) List(c *gin.Context) {
 		return
 	}
 
-	query := applyDateRange(h.DB.Model(&models.Expense{}), "expense_date", dateRange)
-	var total decimal.Decimal
-	if err := query.Select("COALESCE(SUM(amount), 0)").Scan(&total).Error; err != nil {
+	var expenses []models.Expense
+	listQuery := applyDateRange(h.DB.Model(&models.Expense{}), "expense_date", dateRange)
+	if err := listQuery.Order("expense_date desc, id desc").Find(&expenses).Error; err != nil {
 		handleDBError(c, err)
 		return
 	}
 
-	var expenses []models.Expense
-	if err := query.Order("expense_date desc, id desc").Find(&expenses).Error; err != nil {
+	var total decimal.Decimal
+	totalQuery := applyDateRange(h.DB.Model(&models.Expense{}), "expense_date", dateRange)
+	if err := totalQuery.Select("COALESCE(SUM(amount), 0)").Scan(&total).Error; err != nil {
 		handleDBError(c, err)
 		return
 	}
+
 	okWithTotalAmount(c, expenses, total)
 }
 
