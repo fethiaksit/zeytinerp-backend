@@ -43,14 +43,11 @@ func parseDateRange(c *gin.Context) (dateRange, bool) {
 }
 
 func applyDateRange(query *gorm.DB, column string, dateRange dateRange) *gorm.DB {
-	if dateRange.start != nil && dateRange.end != nil {
-		return query.Where(column+" BETWEEN ? AND ?", *dateRange.start, *dateRange.end)
-	}
 	if dateRange.start != nil {
-		return query.Where(column+" >= ?", *dateRange.start)
+		query = query.Where(column+" >= ?", *dateRange.start)
 	}
 	if dateRange.end != nil {
-		return query.Where(column+" <= ?", *dateRange.end)
+		query = query.Where(column+" <= ?", *dateRange.end)
 	}
 	return query
 }

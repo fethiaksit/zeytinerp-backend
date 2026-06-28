@@ -52,19 +52,42 @@ func TestParseDateRange(t *testing.T) {
 	}
 }
 
-func TestApplyDateRangeUsesBetweenForFullRange(t *testing.T) {
+func TestApplyDateRangeUsesIndependentBoundaries(t *testing.T) {
 	db := newDryRunDB(t)
-
 	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
-	var expenses []models.Expense
-	statement := applyDateRange(db.Model(&models.Expense{}), "expense_date", dateRange{
-		start: &start,
-		end:   &end,
-	}).Find(&expenses).Statement
 
-	if sql := statement.SQL.String(); !strings.Contains(sql, "expense_date BETWEEN $1 AND $2") {
-		t.Fatalf("query does not use BETWEEN: %s", sql)
+	tests := []struct {
+		name      string
+		column    string
+		dateRange dateRange
+		wantStart bool
+		wantEnd   bool
+	}{
+		{name: "expense start only", column: "expense_date", dateRange: dateRange{start: &start}, wantStart: true},
+		{name: "expense end only", column: "expense_date", dateRange: dateRange{end: &end}, wantEnd: true},
+		{name: "expense full range", column: "expense_date", dateRange: dateRange{start: &start, end: &end}, wantStart: true, wantEnd: true},
+		{name: "income start only", column: "income_date", dateRange: dateRange{start: &start}, wantStart: true},
+		{name: "income end only", column: "income_date", dateRange: dateRange{end: &end}, wantEnd: true},
+		{name: "income full range", column: "income_date", dateRange: dateRange{start: &start, end: &end}, wantStart: true, wantEnd: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var expenses []models.Expense
+			sql := applyDateRange(db.Model(&models.Expense{}), tt.column, tt.dateRange).
+				Find(&expenses).Statement.SQL.String()
+
+			if got := strings.Contains(sql, tt.column+" >="); got != tt.wantStart {
+				t.Fatalf("start condition presence = %v, want %v: %s", got, tt.wantStart, sql)
+			}
+			if got := strings.Contains(sql, tt.column+" <="); got != tt.wantEnd {
+				t.Fatalf("end condition presence = %v, want %v: %s", got, tt.wantEnd, sql)
+			}
+			if strings.Contains(sql, "BETWEEN") {
+				t.Fatalf("query unexpectedly uses BETWEEN: %s", sql)
+			}
+		})
 	}
 }
 
@@ -98,6 +121,15 @@ func TestListAndTotalQueriesAreIndependent(t *testing.T) {
 	}
 	if strings.Contains(totalSQL, "ORDER BY") {
 		t.Fatalf("total query contains list ordering: %s", totalSQL)
+	}
+
+	for name, sql := range map[string]string{"list": listSQL, "total": totalSQL} {
+		if !strings.Contains(sql, "expense_date >=") {
+			t.Fatalf("%s query does not contain start condition: %s", name, sql)
+		}
+		if !strings.Contains(sql, "expense_date <=") {
+			t.Fatalf("%s query does not contain end condition: %s", name, sql)
+		}
 	}
 }
 
