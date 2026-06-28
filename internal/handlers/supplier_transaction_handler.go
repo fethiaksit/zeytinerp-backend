@@ -351,7 +351,11 @@ func (r supplierTransactionRequest) toModel(ctx context.Context, db *gorm.DB) (m
 }
 
 func normalizeSupplierPaymentMethod(method, txType string) (string, error) {
-	method = strings.TrimSpace(method)
+	method = strings.ToLower(strings.TrimSpace(method))
+	method = strings.ReplaceAll(method, "i\u0307", "i")
+	if method == "nakit" {
+		method = "cash"
+	}
 	if method == "bank" {
 		method = "bank_transfer"
 	}

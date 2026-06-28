@@ -16,6 +16,7 @@ type MoneyAnalysis struct {
 	Month                 string                       `json:"month"`
 	Income                decimal.Decimal              `json:"income"`
 	Expense               decimal.Decimal              `json:"expense"`
+	SupplierCashPayments  decimal.Decimal              `json:"supplier_cash_payments"`
 	ExpectedBalance       decimal.Decimal              `json:"expected_balance"`
 	CashBalance           decimal.Decimal              `json:"cash_balance"`
 	BankBalance           decimal.Decimal              `json:"bank_balance"`
@@ -39,7 +40,7 @@ func MoneyAnalysisForMonth(db *gorm.DB, monthStart time.Time) (MoneyAnalysis, er
 	if err != nil {
 		return MoneyAnalysis{}, err
 	}
-	expense, err := moneyAnalysisExpense(db, monthStart, monthEnd)
+	expense, supplierCashPayments, err := moneyAnalysisExpense(db, monthStart, monthEnd)
 	if err != nil {
 		return MoneyAnalysis{}, err
 	}
@@ -77,6 +78,7 @@ func MoneyAnalysisForMonth(db *gorm.DB, monthStart time.Time) (MoneyAnalysis, er
 		Month:                 monthStart.Format("2006-01"),
 		Income:                income,
 		Expense:               expense,
+		SupplierCashPayments:  supplierCashPayments,
 		ExpectedBalance:       expectedBalance,
 		CashBalance:           cashBalance,
 		BankBalance:           bankBalance,
@@ -118,25 +120,26 @@ func moneyAnalysisIncome(db *gorm.DB, start, end time.Time) (decimal.Decimal, er
 	return cashReportIncome.Add(manualIncome), nil
 }
 
-func moneyAnalysisExpense(db *gorm.DB, start, end time.Time) (decimal.Decimal, error) {
+func moneyAnalysisExpense(db *gorm.DB, start, end time.Time) (decimal.Decimal, decimal.Decimal, error) {
+	total, supplierCashPayments, err := DailyCashOutflowBetween(db, start, end)
+	if err != nil {
+		return decimal.Zero, decimal.Zero, err
+	}
 	queries := []struct {
 		query string
 	}{
-		{`SELECT COALESCE(SUM(amount), 0)::text FROM expenses WHERE expense_date >= ? AND expense_date < ?`},
-		{`SELECT COALESCE(SUM(amount_try), 0)::text FROM supplier_transactions WHERE type = 'payment' AND transaction_date >= ? AND transaction_date < ?`},
 		{`SELECT COALESCE(SUM(amount), 0)::text FROM employee_transactions WHERE type IN ('payment', 'advance') AND transaction_date >= ? AND transaction_date < ?`},
 		{`SELECT COALESCE(SUM(amount), 0)::text FROM financial_debt_payments WHERE payment_date >= ? AND payment_date < ?`},
 	}
 
-	total := decimal.Zero
 	for _, item := range queries {
 		amount, err := decimalFromQuery(db, item.query, start, end)
 		if err != nil {
-			return decimal.Zero, err
+			return decimal.Zero, decimal.Zero, err
 		}
 		total = total.Add(amount)
 	}
-	return total, nil
+	return total, supplierCashPayments, nil
 }
 
 func moneyAnalysisWalletBalance(db *gorm.DB) (decimal.Decimal, error) {

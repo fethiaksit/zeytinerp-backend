@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_supplier_transactions_cash_payment_date;

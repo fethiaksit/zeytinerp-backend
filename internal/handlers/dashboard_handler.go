@@ -301,11 +301,8 @@ func (h *DashboardHandler) incomeBetween(start, end time.Time) (decimal.Decimal,
 }
 
 func (h *DashboardHandler) expenseBetween(start, end time.Time) (decimal.Decimal, error) {
-	return dashboardDecimal(h.DB, `
-		SELECT COALESCE(SUM(amount), 0)::text
-		FROM expenses
-		WHERE expense_date >= ? AND expense_date < ?
-	`, start, end)
+	total, _, err := services.DailyCashOutflowBetween(h.DB, start, end)
+	return total, err
 }
 
 func (h *DashboardHandler) topSupplierDebts() ([]services.SupplierBalanceRow, error) {

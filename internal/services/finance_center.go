@@ -232,14 +232,11 @@ func financeCenterMonthlyTotals(db *gorm.DB, start, end time.Time) (FinanceCente
 		return FinanceCenterMonthlyDetails{}, decimal.Zero, decimal.Zero, decimal.Zero, err
 	}
 
-	expenseEntries, err := decimalFromQuery(db, `SELECT COALESCE(SUM(amount), 0)::text FROM expenses WHERE expense_date >= ? AND expense_date < ?`, start, end)
+	dailyCashOutflow, supplierPayments, err := DailyCashOutflowBetween(db, start, end)
 	if err != nil {
 		return FinanceCenterMonthlyDetails{}, decimal.Zero, decimal.Zero, decimal.Zero, err
 	}
-	supplierPayments, err := decimalFromQuery(db, `SELECT COALESCE(SUM(amount_try), 0)::text FROM supplier_transactions WHERE type = 'payment' AND transaction_date >= ? AND transaction_date < ?`, start, end)
-	if err != nil {
-		return FinanceCenterMonthlyDetails{}, decimal.Zero, decimal.Zero, decimal.Zero, err
-	}
+	expenseEntries := dailyCashOutflow.Sub(supplierPayments)
 	personnelPayments, err := decimalFromQuery(db, `SELECT COALESCE(SUM(amount), 0)::text FROM employee_transactions WHERE type = 'payment' AND transaction_date >= ? AND transaction_date < ?`, start, end)
 	if err != nil {
 		return FinanceCenterMonthlyDetails{}, decimal.Zero, decimal.Zero, decimal.Zero, err
@@ -310,21 +307,11 @@ func FinanceCenterMoneyFlowData(db *gorm.DB, start, end time.Time) (FinanceCente
 	if err != nil {
 		return FinanceCenterMoneyFlow{}, err
 	}
-	expenseEntries, err := decimalFromQuery(db, `
-		SELECT COALESCE(SUM(amount), 0)::text
-		FROM expenses WHERE expense_date >= ? AND expense_date < ?
-	`, start, end)
+	dailyCashOutflow, supplierPayments, err := DailyCashOutflowBetween(db, start, end)
 	if err != nil {
 		return FinanceCenterMoneyFlow{}, err
 	}
-	supplierPayments, err := decimalFromQuery(db, `
-		SELECT COALESCE(SUM(amount_try), 0)::text
-		FROM supplier_transactions
-		WHERE type = 'payment' AND transaction_date >= ? AND transaction_date < ?
-	`, start, end)
-	if err != nil {
-		return FinanceCenterMoneyFlow{}, err
-	}
+	expenseEntries := dailyCashOutflow.Sub(supplierPayments)
 	employeePayments, err := decimalFromQuery(db, `
 		SELECT COALESCE(SUM(amount), 0)::text
 		FROM employee_transactions
@@ -514,7 +501,11 @@ func FinanceCenterCashflowData(db *gorm.DB, until time.Time, monthCount int) ([]
 			FROM expenses WHERE expense_date >= ? AND expense_date < ? GROUP BY 1
 			UNION ALL
 			SELECT date_trunc('month', transaction_date)::date, SUM(amount_try)
-			FROM supplier_transactions WHERE type = 'payment' AND transaction_date >= ? AND transaction_date < ? GROUP BY 1
+			FROM supplier_transactions
+			WHERE type = 'payment'
+				AND LOWER(BTRIM(payment_method)) IN ('cash', 'nakit')
+				AND transaction_date >= ? AND transaction_date < ?
+			GROUP BY 1
 			UNION ALL
 			SELECT date_trunc('month', transaction_date)::date, SUM(amount)
 			FROM employee_transactions WHERE type IN ('payment', 'advance') AND transaction_date >= ? AND transaction_date < ? GROUP BY 1

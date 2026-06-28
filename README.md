@@ -77,6 +77,7 @@ psql "$DATABASE_URL" -f migrations/008_wallet.up.sql
 psql "$DATABASE_URL" -f migrations/009_finance_center_indexes.up.sql
 psql "$DATABASE_URL" -f migrations/010_supplier_transaction_currencies.up.sql
 psql "$DATABASE_URL" -f migrations/011_supplier_transaction_payment_return_files.up.sql
+psql "$DATABASE_URL" -f migrations/012_supplier_cash_payment_index.up.sql
 ```
 
 Uygulama açılırken migration dosyalarını otomatik de çalıştırır.
@@ -697,6 +698,6 @@ Cüzdan açılış bakiyesi:
 - Cüzdan girişleri: `opening_balance`, `cash_income`, `cash_sale`, `pos_income`, `bank_income`, `cash_deposit`
 - Cüzdan çıkışları: `payment`, `expense`, `cash_withdraw`
 - Cüzdan `correction` hareketinde tutar pozitifse bakiye artar, negatifse azalır.
-- Para analizi gelirini günlük kasa cirosu ve `income_entries` kayıtlarından, giderini ise gider kayıtları ile firma/personel/finans ödeme kayıtlarından hesaplar. Cüzdan ve banka hareketleri para transferi olabildiği için gelir-gidere tekrar eklenmez; güncel para konumu olarak `cash_balance` ve `bank_balance` alanlarında gösterilir.
+- Para analizi gelirini günlük kasa cirosu ve `income_entries` kayıtlarından hesaplar. Gider tarafına gider kayıtları, yalnızca `cash` yöntemli firma ödemeleri ve personel/finans ödemeleri eklenir. Banka, kart ve havale ile yapılan firma ödemeleri nakit çıkışı sayılmaz. Cüzdan ve banka hareketleri para transferi olabildiği için gelir-gidere tekrar eklenmez; güncel para konumu olarak `cash_balance` ve `bank_balance` alanlarında gösterilir.
 - Para analizi `employee_advances` alanı seçilen ay içindeki personel avanslarını gösterir. Müşteri cari tablosu yoksa `customer_receivables`, POS bekleyen tahsilat için ayrı kayıt yoksa `pending_pos` sıfır döner.
 - Net: `gelir - gider`
