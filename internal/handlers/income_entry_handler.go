@@ -44,20 +44,22 @@ func (h *IncomeEntryHandler) Create(c *gin.Context) {
 }
 
 func (h *IncomeEntryHandler) List(c *gin.Context) {
-	dateRange, valid := parseDateRange(c)
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	dateRange, valid := parseDateRange(c, startDate, endDate)
 	if !valid {
 		return
 	}
 
 	var entries []models.IncomeEntry
-	listQuery := applyDateRange(h.DB.Model(&models.IncomeEntry{}), "income_date", dateRange)
+	listQuery := applyIncomeDateRange(h.DB.Model(&models.IncomeEntry{}), dateRange)
 	if err := listQuery.Order("income_date desc, id desc").Find(&entries).Error; err != nil {
 		handleDBError(c, err)
 		return
 	}
 
 	var total decimal.Decimal
-	totalQuery := applyDateRange(h.DB.Model(&models.IncomeEntry{}), "income_date", dateRange)
+	totalQuery := applyIncomeDateRange(h.DB.Model(&models.IncomeEntry{}), dateRange)
 	if err := totalQuery.Select("COALESCE(SUM(amount), 0)").Scan(&total).Error; err != nil {
 		handleDBError(c, err)
 		return

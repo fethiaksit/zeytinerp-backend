@@ -39,7 +39,7 @@ func TestParseDateRange(t *testing.T) {
 			context, _ := gin.CreateTestContext(response)
 			context.Request = httptest.NewRequest("GET", "/?"+tt.query.Encode(), nil)
 
-			dateRange, valid := parseDateRange(context)
+			dateRange, valid := parseDateRange(context, context.Query("start_date"), context.Query("end_date"))
 			if valid != tt.wantValid {
 				t.Fatalf("valid = %v, want %v", valid, tt.wantValid)
 			}
@@ -60,23 +60,22 @@ func TestApplyDateRangeUsesIndependentBoundaries(t *testing.T) {
 	tests := []struct {
 		name      string
 		column    string
+		buildSQL  func(dateRange) string
 		dateRange dateRange
 		wantStart bool
 		wantEnd   bool
 	}{
-		{name: "expense start only", column: "expense_date", dateRange: dateRange{start: &start}, wantStart: true},
-		{name: "expense end only", column: "expense_date", dateRange: dateRange{end: &end}, wantEnd: true},
-		{name: "expense full range", column: "expense_date", dateRange: dateRange{start: &start, end: &end}, wantStart: true, wantEnd: true},
-		{name: "income start only", column: "income_date", dateRange: dateRange{start: &start}, wantStart: true},
-		{name: "income end only", column: "income_date", dateRange: dateRange{end: &end}, wantEnd: true},
-		{name: "income full range", column: "income_date", dateRange: dateRange{start: &start, end: &end}, wantStart: true, wantEnd: true},
+		{name: "expense start only", column: "expenses.expense_date", buildSQL: func(filter dateRange) string { return expenseListSQL(db, filter) }, dateRange: dateRange{start: &start}, wantStart: true},
+		{name: "expense end only", column: "expenses.expense_date", buildSQL: func(filter dateRange) string { return expenseListSQL(db, filter) }, dateRange: dateRange{end: &end}, wantEnd: true},
+		{name: "expense full range", column: "expenses.expense_date", buildSQL: func(filter dateRange) string { return expenseListSQL(db, filter) }, dateRange: dateRange{start: &start, end: &end}, wantStart: true, wantEnd: true},
+		{name: "income start only", column: "income_entries.income_date", buildSQL: func(filter dateRange) string { return incomeListSQL(db, filter) }, dateRange: dateRange{start: &start}, wantStart: true},
+		{name: "income end only", column: "income_entries.income_date", buildSQL: func(filter dateRange) string { return incomeListSQL(db, filter) }, dateRange: dateRange{end: &end}, wantEnd: true},
+		{name: "income full range", column: "income_entries.income_date", buildSQL: func(filter dateRange) string { return incomeListSQL(db, filter) }, dateRange: dateRange{start: &start, end: &end}, wantStart: true, wantEnd: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var expenses []models.Expense
-			sql := applyDateRange(db.Model(&models.Expense{}), tt.column, tt.dateRange).
-				Find(&expenses).Statement.SQL.String()
+			sql := tt.buildSQL(tt.dateRange)
 
 			if got := strings.Contains(sql, tt.column+" >="); got != tt.wantStart {
 				t.Fatalf("start condition presence = %v, want %v: %s", got, tt.wantStart, sql)
@@ -97,40 +96,98 @@ func TestListAndTotalQueriesAreIndependent(t *testing.T) {
 	end := time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
 	dateRange := dateRange{start: &start, end: &end}
 
+	tests := []struct {
+		name     string
+		column   string
+		listSQL  string
+		totalSQL string
+	}{
+		{name: "expenses", column: "expenses.expense_date", listSQL: expenseListSQL(db, dateRange), totalSQL: expenseTotalSQL(db, dateRange)},
+		{name: "incomes", column: "income_entries.income_date", listSQL: incomeListSQL(db, dateRange), totalSQL: incomeTotalSQL(db, dateRange)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if strings.Contains(tt.listSQL, "SUM(") {
+				t.Fatalf("list query contains aggregate: %s", tt.listSQL)
+			}
+			if !strings.Contains(tt.listSQL, "ORDER BY") {
+				t.Fatalf("list query lost its ordering: %s", tt.listSQL)
+			}
+			if !strings.Contains(tt.totalSQL, "SUM(amount)") {
+				t.Fatalf("total query does not contain aggregate: %s", tt.totalSQL)
+			}
+			if strings.Contains(tt.totalSQL, "ORDER BY") {
+				t.Fatalf("total query contains list ordering: %s", tt.totalSQL)
+			}
+
+			for queryName, sql := range map[string]string{"list": tt.listSQL, "total": tt.totalSQL} {
+				if !strings.Contains(sql, tt.column+" >=") {
+					t.Fatalf("%s query does not contain start condition: %s", queryName, sql)
+				}
+				if !strings.Contains(sql, tt.column+" <=") {
+					t.Fatalf("%s query does not contain end condition: %s", queryName, sql)
+				}
+			}
+		})
+	}
+}
+
+func TestDateFilterArgumentOrder(t *testing.T) {
+	db := newDryRunDB(t)
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
+	filter := dateRange{start: &start, end: &end}
+
+	queries := []struct {
+		name      string
+		statement *gorm.Statement
+	}{
+		{name: "expenses", statement: applyExpenseDateRange(db.Model(&models.Expense{}), filter).Find(&[]models.Expense{}).Statement},
+		{name: "incomes", statement: applyIncomeDateRange(db.Model(&models.IncomeEntry{}), filter).Find(&[]models.IncomeEntry{}).Statement},
+	}
+
+	for _, query := range queries {
+		t.Run(query.name, func(t *testing.T) {
+			if len(query.statement.Vars) != 2 {
+				t.Fatalf("argument count = %d, want 2", len(query.statement.Vars))
+			}
+			if query.statement.Vars[0] != start {
+				t.Fatalf("first argument = %v, want start date %v", query.statement.Vars[0], start)
+			}
+			if query.statement.Vars[1] != end {
+				t.Fatalf("second argument = %v, want end date %v", query.statement.Vars[1], end)
+			}
+		})
+	}
+}
+
+func expenseListSQL(db *gorm.DB, dateRange dateRange) string {
 	var expenses []models.Expense
-	listStatement := applyDateRange(db.Model(&models.Expense{}), "expense_date", dateRange).
+	return applyExpenseDateRange(db.Model(&models.Expense{}), dateRange).
 		Order("expense_date desc, id desc").
-		Find(&expenses).Statement
+		Find(&expenses).Statement.SQL.String()
+}
 
+func expenseTotalSQL(db *gorm.DB, dateRange dateRange) string {
 	var total decimal.Decimal
-	totalStatement := applyDateRange(db.Model(&models.Expense{}), "expense_date", dateRange).
+	return applyExpenseDateRange(db.Model(&models.Expense{}), dateRange).
 		Select("COALESCE(SUM(amount), 0)").
-		Scan(&total).Statement
+		Scan(&total).Statement.SQL.String()
+}
 
-	listSQL := listStatement.SQL.String()
-	if strings.Contains(listSQL, "SUM(") {
-		t.Fatalf("list query contains aggregate: %s", listSQL)
-	}
-	if !strings.Contains(listSQL, "ORDER BY expense_date desc, id desc") {
-		t.Fatalf("list query lost its ordering: %s", listSQL)
-	}
+func incomeListSQL(db *gorm.DB, dateRange dateRange) string {
+	var entries []models.IncomeEntry
+	return applyIncomeDateRange(db.Model(&models.IncomeEntry{}), dateRange).
+		Order("income_date desc, id desc").
+		Find(&entries).Statement.SQL.String()
+}
 
-	totalSQL := totalStatement.SQL.String()
-	if !strings.Contains(totalSQL, "SUM(amount)") {
-		t.Fatalf("total query does not contain aggregate: %s", totalSQL)
-	}
-	if strings.Contains(totalSQL, "ORDER BY") {
-		t.Fatalf("total query contains list ordering: %s", totalSQL)
-	}
-
-	for name, sql := range map[string]string{"list": listSQL, "total": totalSQL} {
-		if !strings.Contains(sql, "expense_date >=") {
-			t.Fatalf("%s query does not contain start condition: %s", name, sql)
-		}
-		if !strings.Contains(sql, "expense_date <=") {
-			t.Fatalf("%s query does not contain end condition: %s", name, sql)
-		}
-	}
+func incomeTotalSQL(db *gorm.DB, dateRange dateRange) string {
+	var total decimal.Decimal
+	return applyIncomeDateRange(db.Model(&models.IncomeEntry{}), dateRange).
+		Select("COALESCE(SUM(amount), 0)").
+		Scan(&total).Statement.SQL.String()
 }
 
 func newDryRunDB(t *testing.T) *gorm.DB {

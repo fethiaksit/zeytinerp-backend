@@ -42,20 +42,22 @@ func (h *ExpenseHandler) Create(c *gin.Context) {
 }
 
 func (h *ExpenseHandler) List(c *gin.Context) {
-	dateRange, valid := parseDateRange(c)
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	dateRange, valid := parseDateRange(c, startDate, endDate)
 	if !valid {
 		return
 	}
 
 	var expenses []models.Expense
-	listQuery := applyDateRange(h.DB.Model(&models.Expense{}), "expense_date", dateRange)
+	listQuery := applyExpenseDateRange(h.DB.Model(&models.Expense{}), dateRange)
 	if err := listQuery.Order("expense_date desc, id desc").Find(&expenses).Error; err != nil {
 		handleDBError(c, err)
 		return
 	}
 
 	var total decimal.Decimal
-	totalQuery := applyDateRange(h.DB.Model(&models.Expense{}), "expense_date", dateRange)
+	totalQuery := applyExpenseDateRange(h.DB.Model(&models.Expense{}), dateRange)
 	if err := totalQuery.Select("COALESCE(SUM(amount), 0)").Scan(&total).Error; err != nil {
 		handleDBError(c, err)
 		return
