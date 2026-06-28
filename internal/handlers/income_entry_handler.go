@@ -44,29 +44,24 @@ func (h *IncomeEntryHandler) Create(c *gin.Context) {
 }
 
 func (h *IncomeEntryHandler) List(c *gin.Context) {
-	var entries []models.IncomeEntry
-	query := h.DB.Order("income_date desc, id desc")
-	if startDate := c.Query("start_date"); startDate != "" {
-		date, err := parseDate(startDate)
-		if err != nil {
-			fail(c, http.StatusBadRequest, "start_date is invalid")
-			return
-		}
-		query = query.Where("income_date >= ?", date)
+	dateRange, valid := parseDateRange(c)
+	if !valid {
+		return
 	}
-	if endDate := c.Query("end_date"); endDate != "" {
-		date, err := parseDate(endDate)
-		if err != nil {
-			fail(c, http.StatusBadRequest, "end_date is invalid")
-			return
-		}
-		query = query.Where("income_date <= ?", date)
-	}
-	if err := query.Find(&entries).Error; err != nil {
+
+	query := applyDateRange(h.DB.Model(&models.IncomeEntry{}), "income_date", dateRange)
+	var total decimal.Decimal
+	if err := query.Select("COALESCE(SUM(amount), 0)").Scan(&total).Error; err != nil {
 		handleDBError(c, err)
 		return
 	}
-	ok(c, entries)
+
+	var entries []models.IncomeEntry
+	if err := query.Order("income_date desc, id desc").Find(&entries).Error; err != nil {
+		handleDBError(c, err)
+		return
+	}
+	okWithTotalAmount(c, entries, total)
 }
 
 func (h *IncomeEntryHandler) Update(c *gin.Context) {

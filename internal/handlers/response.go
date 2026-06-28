@@ -12,14 +12,19 @@ import (
 )
 
 type Response struct {
-	Success bool        `json:"success"`
-	Message string      `json:"message,omitempty"`
-	Data    interface{} `json:"data,omitempty"`
-	Error   string      `json:"error,omitempty"`
+	Success     bool             `json:"success"`
+	Message     string           `json:"message,omitempty"`
+	Data        interface{}      `json:"data,omitempty"`
+	TotalAmount *decimal.Decimal `json:"total_amount,omitempty"`
+	Error       string           `json:"error,omitempty"`
 }
 
 func ok(c *gin.Context, data interface{}) {
 	c.JSON(http.StatusOK, Response{Success: true, Data: data})
+}
+
+func okWithTotalAmount(c *gin.Context, data interface{}, total decimal.Decimal) {
+	c.JSON(http.StatusOK, Response{Success: true, Data: data, TotalAmount: &total})
 }
 
 func created(c *gin.Context, data interface{}) {

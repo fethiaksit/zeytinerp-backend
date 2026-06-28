@@ -224,6 +224,8 @@ Giderler:
 - `PUT /api/expenses/:id`
 - `DELETE /api/expenses/:id`
 
+`start_date` ve `end_date` filtreleri iki uç dahil olacak şekilde uygulanır. Liste cevabındaki `total_amount`, aynı tarih filtresindeki giderlerin toplamıdır.
+
 Gelirler:
 
 - `POST /api/income-entries`
@@ -231,6 +233,8 @@ Gelirler:
 - `GET /api/income-entries?start_date=2026-05-01&end_date=2026-05-31`
 - `PUT /api/income-entries/:id`
 - `DELETE /api/income-entries/:id`
+
+`start_date` ve `end_date` filtreleri iki uç dahil olacak şekilde uygulanır. Liste cevabındaki `total_amount`, aynı tarih filtresindeki gelirlerin toplamıdır.
 
 Finans borçları:
 

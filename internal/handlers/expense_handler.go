@@ -42,29 +42,24 @@ func (h *ExpenseHandler) Create(c *gin.Context) {
 }
 
 func (h *ExpenseHandler) List(c *gin.Context) {
-	var expenses []models.Expense
-	query := h.DB.Order("expense_date desc, id desc")
-	if startDate := c.Query("start_date"); startDate != "" {
-		date, err := parseDate(startDate)
-		if err != nil {
-			fail(c, http.StatusBadRequest, "start_date is invalid")
-			return
-		}
-		query = query.Where("expense_date >= ?", date)
+	dateRange, valid := parseDateRange(c)
+	if !valid {
+		return
 	}
-	if endDate := c.Query("end_date"); endDate != "" {
-		date, err := parseDate(endDate)
-		if err != nil {
-			fail(c, http.StatusBadRequest, "end_date is invalid")
-			return
-		}
-		query = query.Where("expense_date <= ?", date)
-	}
-	if err := query.Find(&expenses).Error; err != nil {
+
+	query := applyDateRange(h.DB.Model(&models.Expense{}), "expense_date", dateRange)
+	var total decimal.Decimal
+	if err := query.Select("COALESCE(SUM(amount), 0)").Scan(&total).Error; err != nil {
 		handleDBError(c, err)
 		return
 	}
-	ok(c, expenses)
+
+	var expenses []models.Expense
+	if err := query.Order("expense_date desc, id desc").Find(&expenses).Error; err != nil {
+		handleDBError(c, err)
+		return
+	}
+	okWithTotalAmount(c, expenses, total)
 }
 
 func (h *ExpenseHandler) Update(c *gin.Context) {
