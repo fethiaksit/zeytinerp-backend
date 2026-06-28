@@ -11,6 +11,7 @@ import (
 	"github.com/shopspring/decimal"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"market-erp-backend/internal/models"
 )
@@ -108,6 +109,9 @@ func TestListAndTotalQueriesAreIndependent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Logf("list SQL: %s", tt.listSQL)
+			t.Logf("total SQL: %s", tt.totalSQL)
+
 			if strings.Contains(tt.listSQL, "SUM(") {
 				t.Fatalf("list query contains aggregate: %s", tt.listSQL)
 			}
@@ -195,6 +199,7 @@ func newDryRunDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(postgres.New(postgres.Config{DSN: "host=localhost"}), &gorm.Config{
 		DryRun:               true,
 		DisableAutomaticPing: true,
+		Logger:               logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		t.Fatal(err)

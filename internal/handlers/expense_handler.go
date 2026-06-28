@@ -106,16 +106,6 @@ func (h *ExpenseHandler) Delete(c *gin.Context) {
 	}
 	ok(c, gin.H{"deleted": true})
 }
-func (h *ExpenseHandler) List(c *gin.Context) {
-    startDate := c.Query("start_date")
-    endDate := c.Query("end_date")
-
-    log.Printf("start_date=%s end_date=%s", startDate, endDate)
-
-    dateRange, valid := parseDateRange(c, startDate, endDate)
-    if !valid {
-        return
-    }
 
 func (r expenseRequest) toModel() (models.Expense, error) {
 	if strings.TrimSpace(r.Category) == "" {
