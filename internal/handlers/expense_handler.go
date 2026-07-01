@@ -12,7 +12,10 @@ import (
 	"market-erp-backend/internal/models"
 )
 
-type ExpenseHandler struct{ DB *gorm.DB }
+type ExpenseHandler struct {
+	DB  *gorm.DB
+	Now func() time.Time
+}
 
 type expenseRequest struct {
 	ExpenseDate   string          `json:"expense_date"`
@@ -39,7 +42,9 @@ type expenseByDateItem struct {
 	Note          string          `json:"note"`
 }
 
-func NewExpenseHandler(db *gorm.DB) *ExpenseHandler { return &ExpenseHandler{DB: db} }
+func NewExpenseHandler(db *gorm.DB) *ExpenseHandler {
+	return &ExpenseHandler{DB: db, Now: time.Now}
+}
 
 func (h *ExpenseHandler) Create(c *gin.Context) {
 	var req expenseRequest
@@ -85,8 +90,19 @@ func (h *ExpenseHandler) List(c *gin.Context) {
 }
 
 func (h *ExpenseHandler) ListByDate(c *gin.Context) {
-	dateValue := strings.TrimSpace(c.Query("date"))
-	if dateValue == "" {
+	dateValue, provided := c.GetQuery("date")
+	dateValue = strings.TrimSpace(dateValue)
+	if !provided {
+		now := time.Now()
+		if h.Now != nil {
+			now = h.Now()
+		}
+		location, err := time.LoadLocation("Europe/Istanbul")
+		if err != nil {
+			location = time.FixedZone("Europe/Istanbul", 3*60*60)
+		}
+		dateValue = now.In(location).Format("2006-01-02")
+	} else if dateValue == "" {
 		fail(c, http.StatusBadRequest, "date is required")
 		return
 	}

@@ -35,7 +35,6 @@ func TestExpenseListByDate(t *testing.T) {
 		wantStatus int
 		wantError  string
 	}{
-		{name: "missing date", query: "", wantStatus: http.StatusBadRequest, wantError: "date is required"},
 		{name: "blank date", query: "?date=%20", wantStatus: http.StatusBadRequest, wantError: "date is required"},
 		{name: "invalid date", query: "?date=2026-02-30", wantStatus: http.StatusBadRequest, wantError: "date is invalid; expected format is YYYY-MM-DD"},
 		{name: "date with time", query: "?date=2026-07-01T10:00:00Z", wantStatus: http.StatusBadRequest, wantError: "date is invalid; expected format is YYYY-MM-DD"},
@@ -76,6 +75,36 @@ func TestExpenseListByDate(t *testing.T) {
 				t.Fatalf("expense order = [%q, %q], want [late, early]", body.Expenses[0].Note, body.Expenses[1].Note)
 			}
 		})
+	}
+}
+
+func TestExpenseListByDateDefaultsToTodayInIstanbul(t *testing.T) {
+	db := newDateFilterTestDB(t)
+	seedExpensesByDate(t, db)
+
+	gin.SetMode(gin.TestMode)
+	handler := NewExpenseHandler(db)
+	// June 30 in UTC, but July 1 in Istanbul.
+	handler.Now = func() time.Time {
+		return time.Date(2026, time.June, 30, 22, 30, 0, 0, time.UTC)
+	}
+	router := gin.New()
+	router.GET("/expenses/by-date", handler.ListByDate)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/expenses/by-date", nil)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+
+	var body expenseByDateTestResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Date != "2026-07-01" || body.Count != 2 || !body.Total.Equal(decimal.RequireFromString("30.5")) {
+		t.Fatalf("response = {date:%q count:%d total:%s}, want {date:%q count:%d total:%s}", body.Date, body.Count, body.Total, "2026-07-01", 2, "30.5")
 	}
 }
 

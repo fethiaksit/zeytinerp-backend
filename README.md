@@ -236,7 +236,7 @@ Giderler:
 
 `start_date` ve `end_date` filtreleri iki uç dahil olacak şekilde uygulanır. Liste cevabındaki `total_amount`, aynı tarih filtresindeki giderlerin toplamıdır.
 
-`GET /api/expenses/by-date` yalnızca `YYYY-MM-DD` biçiminde zorunlu bir `date` parametresi alır. Seçilen günün tüm giderlerini sayfalama olmadan `expense_date DESC` sırasıyla döndürür; `total` ve `count` backend tarafından hesaplanır. Filtre, `expense_date >= gün başlangıcı AND expense_date < ertesi gün` aralığını kullanır.
+`GET /api/expenses/by-date`, isteğe bağlı olarak `YYYY-MM-DD` biçiminde bir `date` parametresi alır; parametre verilmezse İstanbul saatine göre bugün kullanılır. Seçilen günün tüm giderlerini sayfalama olmadan `expense_date DESC` sırasıyla döndürür; `total` ve `count` backend tarafından hesaplanır. Filtre, `expense_date >= gün başlangıcı AND expense_date < ertesi gün` aralığını kullanır.
 
 Örnek cevap:
 
