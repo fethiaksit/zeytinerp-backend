@@ -9,6 +9,8 @@ import (
 
 func RegisterSupplierRoutes(api *gin.RouterGroup, db *gorm.DB) {
 	handler := handlers.NewSupplierHandler(db)
+	api.GET("/firms/today-visits", handler.TodayVisits)
+	api.GET("/firms/visits", handler.Visits)
 	api.POST("/suppliers", handler.Create)
 	api.GET("/suppliers", handler.List)
 	api.GET("/suppliers-balances", handler.Balances)

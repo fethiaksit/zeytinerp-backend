@@ -78,6 +78,7 @@ psql "$DATABASE_URL" -f migrations/009_finance_center_indexes.up.sql
 psql "$DATABASE_URL" -f migrations/010_supplier_transaction_currencies.up.sql
 psql "$DATABASE_URL" -f migrations/011_supplier_transaction_payment_return_files.up.sql
 psql "$DATABASE_URL" -f migrations/012_supplier_cash_payment_index.up.sql
+psql "$DATABASE_URL" -f migrations/013_supplier_visit_days.up.sql
 ```
 
 Uygulama açılırken migration dosyalarını otomatik de çalıştırır.
@@ -171,6 +172,13 @@ Firmalar:
 - `GET /api/suppliers/:id/balance`
 - `GET /api/suppliers-balances`
 - `GET /api/suppliers-currency-totals`
+- `GET /api/firms/today-visits`
+- `GET /api/firms/visits?day=monday`
+
+Firma oluşturma ve güncelleme isteklerinde `visit_days` alanı haftanın birden fazla
+gününü alır. Değerler `monday`, `tuesday`, `wednesday`, `thursday`, `friday`,
+`saturday`, `sunday` olarak saklanır; Türkçe gün adları da kabul edilip bu değerlere
+dönüştürülür. Örnek: `"visit_days": ["monday", "thursday"]`.
 
 Firma hareketleri:
 
