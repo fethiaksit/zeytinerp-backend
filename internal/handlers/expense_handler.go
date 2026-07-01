@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -15,6 +16,23 @@ type ExpenseHandler struct{ DB *gorm.DB }
 
 type expenseRequest struct {
 	ExpenseDate   string          `json:"expense_date"`
+	Category      string          `json:"category"`
+	Amount        decimal.Decimal `json:"amount"`
+	PaymentMethod string          `json:"payment_method"`
+	Note          string          `json:"note"`
+}
+
+type expensesByDateResponse struct {
+	Success  bool                `json:"success"`
+	Date     string              `json:"date"`
+	Total    decimal.Decimal     `json:"total"`
+	Count    int                 `json:"count"`
+	Expenses []expenseByDateItem `json:"expenses"`
+}
+
+type expenseByDateItem struct {
+	ID            uint            `json:"id"`
+	ExpenseDate   time.Time       `json:"expense_date"`
 	Category      string          `json:"category"`
 	Amount        decimal.Decimal `json:"amount"`
 	PaymentMethod string          `json:"payment_method"`
@@ -64,6 +82,57 @@ func (h *ExpenseHandler) List(c *gin.Context) {
 	}
 
 	okWithTotalAmount(c, expenses, total)
+}
+
+func (h *ExpenseHandler) ListByDate(c *gin.Context) {
+	dateValue := strings.TrimSpace(c.Query("date"))
+	if dateValue == "" {
+		fail(c, http.StatusBadRequest, "date is required")
+		return
+	}
+
+	dayStart, err := time.Parse("2006-01-02", dateValue)
+	if err != nil {
+		fail(c, http.StatusBadRequest, "date is invalid; expected format is YYYY-MM-DD")
+		return
+	}
+	dayEnd := dayStart.AddDate(0, 0, 1)
+
+	expenses := make([]models.Expense, 0)
+	if err := expensesForDayQuery(h.DB, dayStart, dayEnd).
+		Order("expense_date desc, id desc").
+		Find(&expenses).Error; err != nil {
+		handleDBError(c, err)
+		return
+	}
+
+	total := decimal.Zero
+	items := make([]expenseByDateItem, 0, len(expenses))
+	for _, expense := range expenses {
+		total = total.Add(expense.Amount)
+		items = append(items, expenseByDateItem{
+			ID:            expense.ID,
+			ExpenseDate:   expense.ExpenseDate,
+			Category:      expense.Category,
+			Amount:        expense.Amount,
+			PaymentMethod: expense.PaymentMethod,
+			Note:          expense.Note,
+		})
+	}
+
+	c.JSON(http.StatusOK, expensesByDateResponse{
+		Success:  true,
+		Date:     dateValue,
+		Total:    total,
+		Count:    len(expenses),
+		Expenses: items,
+	})
+}
+
+func expensesForDayQuery(db *gorm.DB, dayStart, dayEnd time.Time) *gorm.DB {
+	return db.Model(&models.Expense{}).
+		Select("id, expense_date, category, amount, payment_method, note").
+		Where("expense_date >= ? AND expense_date < ?", dayStart, dayEnd)
 }
 
 func (h *ExpenseHandler) Update(c *gin.Context) {

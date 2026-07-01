@@ -230,10 +230,36 @@ Giderler:
 - `POST /api/expenses`
 - `GET /api/expenses`
 - `GET /api/expenses?start_date=2026-05-01&end_date=2026-05-31`
+- `GET /api/expenses/by-date?date=2026-07-01`
 - `PUT /api/expenses/:id`
 - `DELETE /api/expenses/:id`
 
 `start_date` ve `end_date` filtreleri iki uç dahil olacak şekilde uygulanır. Liste cevabındaki `total_amount`, aynı tarih filtresindeki giderlerin toplamıdır.
+
+`GET /api/expenses/by-date` yalnızca `YYYY-MM-DD` biçiminde zorunlu bir `date` parametresi alır. Seçilen günün tüm giderlerini sayfalama olmadan `expense_date DESC` sırasıyla döndürür; `total` ve `count` backend tarafından hesaplanır. Filtre, `expense_date >= gün başlangıcı AND expense_date < ertesi gün` aralığını kullanır.
+
+Örnek cevap:
+
+```json
+{
+  "success": true,
+  "date": "2026-07-01",
+  "total": "5425.50",
+  "count": 8,
+  "expenses": [
+    {
+      "id": 15,
+      "expense_date": "2026-07-01T00:00:00Z",
+      "category": "market_gideri",
+      "amount": "1250",
+      "payment_method": "Nakit",
+      "note": "ABC Gıda"
+    }
+  ]
+}
+```
+
+Para alanları, diğer finans endpointlerinde olduğu gibi hassasiyet kaybını önlemek için JSON string olarak döner. Mevcut `expenses.expense_date` kolonu `DATE` tipinde olduğundan saat bilgisi saklanmaz.
 
 Gelirler:
 
