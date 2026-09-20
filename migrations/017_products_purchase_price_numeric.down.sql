@@ -1,0 +1,2 @@
+-- Intentionally non-destructive.
+-- Do not convert purchase_price back to INTEGER because that would lose decimal precision.
