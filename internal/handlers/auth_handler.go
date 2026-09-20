@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -22,10 +23,15 @@ type loginRequest struct {
 }
 
 type authUserResponse struct {
-	ID       uint   `json:"id"`
-	Username string `json:"username"`
-	Name     string `json:"name"`
-	Role     string `json:"role"`
+	ID          uint       `json:"id"`
+	Username    string     `json:"username"`
+	FirstName   string     `json:"first_name,omitempty"`
+	LastName    string     `json:"last_name,omitempty"`
+	FullName    string     `json:"full_name,omitempty"`
+	Name        string     `json:"name"`
+	Role        string     `json:"role"`
+	IsActive    bool       `json:"is_active"`
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
 }
 
 func NewAuthHandler(db *gorm.DB, jwtSecret string) *AuthHandler {
@@ -54,10 +60,20 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		fail(c, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
+
+	if !user.IsActive {
+		fail(c, http.StatusUnauthorized, "user account is inactive")
+		return
+	}
+
 	if err := services.ComparePassword(user.PasswordHash, req.Password); err != nil {
 		fail(c, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
+
+	now := time.Now()
+	_ = h.DB.Model(&user).Update("last_login_at", now).Error
+	user.LastLoginAt = &now
 
 	token, err := services.GenerateJWT(h.JWTSecret, services.NewAuthClaims(user.ID, user.Username, user.Role))
 	if err != nil {
@@ -87,10 +103,16 @@ func (h *AuthHandler) Me(c *gin.Context) {
 }
 
 func authUser(user models.User) authUserResponse {
+	fullName := user.FullName()
 	return authUserResponse{
-		ID:       user.ID,
-		Username: user.Username,
-		Name:     user.Name,
-		Role:     user.Role,
+		ID:          user.ID,
+		Username:    user.Username,
+		FirstName:   user.FirstName,
+		LastName:    user.LastName,
+		FullName:    fullName,
+		Name:        fullName,
+		Role:        user.Role,
+		IsActive:    user.IsActive,
+		LastLoginAt: user.LastLoginAt,
 	}
 }

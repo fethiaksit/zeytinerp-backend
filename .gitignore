@@ -3,3 +3,7 @@
 .gomodcache/
 tmp/
 bin/
+
+._*
+zeytinerp
+*.before_*

@@ -43,6 +43,7 @@ func SetupRouter(db *gorm.DB, jwtSecret string, corsAllowedOrigins []string) *gi
 	api.Use(middleware.AuthRequired(jwtSecret))
 
 	api.GET("/auth/me", authHandler.Me)
+	RegisterAdminEmployeeRoutes(api, db)
 	RegisterDashboardRoutes(api, db)
 	RegisterDebtSnapshotRoutes(api, db)
 	RegisterMoneyAnalysisRoutes(api, db)
