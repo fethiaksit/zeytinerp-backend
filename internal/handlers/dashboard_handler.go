@@ -273,15 +273,54 @@ func reportSummary(data gin.H) gin.H {
 }
 
 func (h *DashboardHandler) revenueBetween(start, end time.Time) (decimal.Decimal, error) {
-	cashRevenue, err := h.cashRevenueBetween(start, end)
-	if err != nil {
-		return decimal.Zero, err
+	// Hızlı Satış entegrasyonunun devreye alındığı tarih.
+	// Bu tarihten önce ciro daily_cash_reports üzerinden,
+	// bu tarihten itibaren sales tablosu üzerinden hesaplanır.
+	posCutover := time.Date(2026, time.September, 20, 0, 0, 0, 0, time.Local)
+
+	legacyRevenue := decimal.Zero
+	posRevenue := decimal.Zero
+
+	if start.Before(posCutover) {
+		legacyEnd := end
+		if legacyEnd.After(posCutover) {
+			legacyEnd = posCutover
+		}
+
+		var err error
+		legacyRevenue, err = h.cashRevenueBetween(start, legacyEnd)
+		if err != nil {
+			return decimal.Zero, err
+		}
 	}
+
+	if end.After(posCutover) {
+		posStart := start
+		if posStart.Before(posCutover) {
+			posStart = posCutover
+		}
+
+		var err error
+		posRevenue, err = h.salesRevenueBetween(posStart, end)
+		if err != nil {
+			return decimal.Zero, err
+		}
+	}
+
 	incomeRevenue, err := h.incomeBetween(start, end)
 	if err != nil {
 		return decimal.Zero, err
 	}
-	return cashRevenue.Add(incomeRevenue), nil
+
+	return legacyRevenue.Add(posRevenue).Add(incomeRevenue), nil
+}
+
+func (h *DashboardHandler) salesRevenueBetween(start, end time.Time) (decimal.Decimal, error) {
+	return dashboardDecimal(h.DB, `
+		SELECT COALESCE(SUM(total_amount), 0)::text
+		FROM sales
+		WHERE created_at >= ? AND created_at < ?
+	`, start, end)
 }
 
 func (h *DashboardHandler) cashRevenueBetween(start, end time.Time) (decimal.Decimal, error) {
