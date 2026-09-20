@@ -1,0 +1,2 @@
+-- Intentionally non-destructive.
+-- Seed categories are retained on rollback to avoid breaking product references by name.
