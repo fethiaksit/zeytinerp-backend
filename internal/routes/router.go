@@ -3,6 +3,7 @@ package routes
 import (
 	"log"
 	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -23,6 +24,17 @@ func SetupRouter(db *gorm.DB, jwtSecret string, corsAllowedOrigins []string) *gi
 	public.GET("/health", handlers.Health)
 	public.GET("/uploads/invoices/*filepath", handlers.ServeInvoiceFile)
 	RegisterExchangeRateRoutes(public, db)
+
+	// Public Read-Only Mobile API Routes for Zeytin Mobil
+	mobileHandler := handlers.NewMobileHandler(db)
+	mobile := router.Group("/api/mobile")
+	{
+		mobile.GET("/products", mobileHandler.ListProducts)
+		mobile.GET("/products/:id", mobileHandler.GetProduct)
+		mobile.GET("/products/new-arrivals", mobileHandler.ListProducts)
+		mobile.GET("/products/price-drops", mobileHandler.ListProducts)
+		mobile.GET("/categories", mobileHandler.Categories)
+	}
 
 	auth := router.Group("/api/auth")
 	auth.POST("/login", authHandler.Login)
@@ -61,7 +73,7 @@ func LogRoutes(router *gin.Engine) {
 	})
 	for _, route := range registeredRoutes {
 		visibility := "PROTECTED"
-		if route.Path == "/health" || route.Path == "/api/auth/login" || route.Path == "/api/exchange-rates/latest" || route.Path == "/uploads/invoices/*filepath" {
+		if route.Path == "/health" || route.Path == "/api/auth/login" || route.Path == "/api/exchange-rates/latest" || route.Path == "/uploads/invoices/*filepath" || strings.HasPrefix(route.Path, "/api/mobile") {
 			visibility = "PUBLIC"
 		}
 		log.Printf("ROUTE %-9s %-7s %s", visibility, route.Method, route.Path)
