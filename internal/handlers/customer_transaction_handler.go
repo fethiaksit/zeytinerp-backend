@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,17 @@ type customerTransactionRequest struct {
 	Type            string          `json:"type"`
 	Amount          decimal.Decimal `json:"amount"`
 	Note            string          `json:"note"`
+}
+
+type customerTransactionResponse struct {
+	ID              uint            `json:"id"`
+	CustomerID      uint            `json:"customer_id"`
+	TransactionDate time.Time       `json:"transaction_date"`
+	Type            string          `json:"type"`
+	Amount          decimal.Decimal `json:"amount"`
+	BalanceAfter    decimal.Decimal `json:"balance_after"`
+	Note            string          `json:"note"`
+	CreatedAt       time.Time       `json:"created_at"`
 }
 
 func NewCustomerTransactionHandler(db *gorm.DB) *CustomerTransactionHandler {
@@ -56,7 +68,39 @@ func (h *CustomerTransactionHandler) Create(c *gin.Context) {
 		handleDBError(c, err)
 		return
 	}
-	created(c, tx)
+
+	// Compute running balance after creation
+	var allTxs []models.CustomerTransaction
+	if err := h.DB.Where("customer_id = ?", req.CustomerID).Order("transaction_date asc, id asc").Find(&allTxs).Error; err != nil {
+		handleDBError(c, err)
+		return
+	}
+
+	runningBalance := decimal.Zero
+	var currentBalanceAfter decimal.Decimal
+	for _, item := range allTxs {
+		if strings.EqualFold(item.Type, "debt") || strings.EqualFold(item.Type, "sale") {
+			runningBalance = runningBalance.Add(item.Amount)
+		} else if strings.EqualFold(item.Type, "payment") || strings.EqualFold(item.Type, "return") {
+			runningBalance = runningBalance.Sub(item.Amount)
+		}
+		if item.ID == tx.ID {
+			currentBalanceAfter = runningBalance
+		}
+	}
+
+	res := customerTransactionResponse{
+		ID:              tx.ID,
+		CustomerID:      tx.CustomerID,
+		TransactionDate: tx.TransactionDate,
+		Type:            tx.Type,
+		Amount:          tx.Amount,
+		BalanceAfter:    currentBalanceAfter,
+		Note:            tx.Note,
+		CreatedAt:       tx.CreatedAt,
+	}
+
+	created(c, res)
 }
 
 // GET /api/customers/:id/transactions or /api/customer-transactions
@@ -70,19 +114,99 @@ func (h *CustomerTransactionHandler) List(c *gin.Context) {
 		customerID = id
 	}
 
-	var txs []models.CustomerTransaction
-	query := h.DB.Order("transaction_date desc, id desc")
-	if customerID != 0 {
-		query = query.Where("customer_id = ?", customerID)
-	} else if qCustID := c.Query("customer_id"); qCustID != "" {
-		query = query.Where("customer_id = ?", qCustID)
+	if customerID == 0 {
+		if qCustID := c.Query("customer_id"); qCustID != "" {
+			var cust models.Customer
+			if err := h.DB.First(&cust, qCustID).Error; err == nil {
+				customerID = cust.ID
+			}
+		}
 	}
 
-	if err := query.Find(&txs).Error; err != nil {
+	if customerID == 0 {
+		var txs []models.CustomerTransaction
+		if err := h.DB.Order("transaction_date desc, id desc").Limit(100).Find(&txs).Error; err != nil {
+			handleDBError(c, err)
+			return
+		}
+		ok(c, txs)
+		return
+	}
+
+	// Fetch all transactions for customer ordered chronologically to compute running balance
+	var allTxs []models.CustomerTransaction
+	if err := h.DB.Where("customer_id = ?", customerID).Order("transaction_date asc, id asc").Find(&allTxs).Error; err != nil {
 		handleDBError(c, err)
 		return
 	}
-	ok(c, txs)
+
+	runningBalance := decimal.Zero
+	responsesWithBalance := make([]customerTransactionResponse, 0, len(allTxs))
+
+	for _, tx := range allTxs {
+		if strings.EqualFold(tx.Type, "debt") || strings.EqualFold(tx.Type, "sale") {
+			runningBalance = runningBalance.Add(tx.Amount)
+		} else if strings.EqualFold(tx.Type, "payment") || strings.EqualFold(tx.Type, "return") {
+			runningBalance = runningBalance.Sub(tx.Amount)
+		}
+
+		responsesWithBalance = append(responsesWithBalance, customerTransactionResponse{
+			ID:              tx.ID,
+			CustomerID:      tx.CustomerID,
+			TransactionDate: tx.TransactionDate,
+			Type:            tx.Type,
+			Amount:          tx.Amount,
+			BalanceAfter:    runningBalance,
+			Note:            tx.Note,
+			CreatedAt:       tx.CreatedAt,
+		})
+	}
+
+	// Read filters
+	startDateStr := strings.TrimSpace(c.Query("start_date"))
+	if startDateStr == "" {
+		startDateStr = strings.TrimSpace(c.Query("startDate"))
+	}
+
+	endDateStr := strings.TrimSpace(c.Query("end_date"))
+	if endDateStr == "" {
+		endDateStr = strings.TrimSpace(c.Query("endDate"))
+	}
+
+	typeFilter := strings.TrimSpace(strings.ToLower(c.Query("type")))
+
+	filtered := make([]customerTransactionResponse, 0, len(responsesWithBalance))
+	for _, item := range responsesWithBalance {
+		dateStr := item.TransactionDate.Format("2006-01-02")
+		if startDateStr != "" && dateStr < startDateStr {
+			continue
+		}
+		if endDateStr != "" && dateStr > endDateStr {
+			continue
+		}
+		if typeFilter != "" && typeFilter != "all" {
+			itemTypeLower := strings.ToLower(item.Type)
+			if typeFilter == "debt" && itemTypeLower != "debt" && itemTypeLower != "sale" {
+				continue
+			} else if typeFilter == "payment" && itemTypeLower != "payment" {
+				continue
+			} else if typeFilter == "sale" && itemTypeLower != "sale" {
+				continue
+			} else if typeFilter == "return" && itemTypeLower != "return" {
+				continue
+			} else if typeFilter != "debt" && typeFilter != "payment" && typeFilter != "sale" && typeFilter != "return" && itemTypeLower != typeFilter {
+				continue
+			}
+		}
+		filtered = append(filtered, item)
+	}
+
+	// Reverse to return descending order (newest first)
+	for i, j := 0, len(filtered)-1; i < j; i, j = i+1, j-1 {
+		filtered[i], filtered[j] = filtered[j], filtered[i]
+	}
+
+	ok(c, filtered)
 }
 
 func (h *CustomerTransactionHandler) Delete(c *gin.Context) {
