@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -24,12 +25,28 @@ func NewCustomerTransactionHandler(db *gorm.DB) *CustomerTransactionHandler {
 	return &CustomerTransactionHandler{DB: db}
 }
 
+// POST /api/customer-transactions or /api/customers/:id/transactions
 func (h *CustomerTransactionHandler) Create(c *gin.Context) {
 	var req customerTransactionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "invalid json body")
 		return
 	}
+
+	if customerIDStr := c.Param("id"); customerIDStr != "" {
+		id, valid := parseID(c)
+		if !valid {
+			return
+		}
+		req.CustomerID = id
+	}
+
+	var customer models.Customer
+	if err := h.DB.First(&customer, req.CustomerID).Error; err != nil {
+		handleDBError(c, err)
+		return
+	}
+
 	tx, err := req.toModel()
 	if err != nil {
 		fail(c, http.StatusBadRequest, err.Error())
@@ -42,12 +59,25 @@ func (h *CustomerTransactionHandler) Create(c *gin.Context) {
 	created(c, tx)
 }
 
+// GET /api/customers/:id/transactions or /api/customer-transactions
 func (h *CustomerTransactionHandler) List(c *gin.Context) {
+	var customerID uint
+	if customerIDStr := c.Param("id"); customerIDStr != "" {
+		id, valid := parseID(c)
+		if !valid {
+			return
+		}
+		customerID = id
+	}
+
 	var txs []models.CustomerTransaction
 	query := h.DB.Order("transaction_date desc, id desc")
-	if customerID := c.Query("customer_id"); customerID != "" {
+	if customerID != 0 {
 		query = query.Where("customer_id = ?", customerID)
+	} else if qCustID := c.Query("customer_id"); qCustID != "" {
+		query = query.Where("customer_id = ?", qCustID)
 	}
+
 	if err := query.Find(&txs).Error; err != nil {
 		handleDBError(c, err)
 		return
@@ -77,9 +107,21 @@ func (r customerTransactionRequest) toModel() (models.CustomerTransaction, error
 	if err := positiveDecimal(r.Amount, "amount"); err != nil {
 		return models.CustomerTransaction{}, err
 	}
-	date, err := parseDate(r.TransactionDate)
-	if err != nil {
-		return models.CustomerTransaction{}, err
+	var date time.Time
+	var err error
+	if r.TransactionDate != "" {
+		date, err = parseDate(r.TransactionDate)
+		if err != nil {
+			return models.CustomerTransaction{}, err
+		}
+	} else {
+		date = time.Now()
 	}
-	return models.CustomerTransaction{CustomerID: r.CustomerID, TransactionDate: date, Type: r.Type, Amount: r.Amount, Note: r.Note}, nil
+	return models.CustomerTransaction{
+		CustomerID:      r.CustomerID,
+		TransactionDate: date,
+		Type:            r.Type,
+		Amount:          r.Amount,
+		Note:            r.Note,
+	}, nil
 }

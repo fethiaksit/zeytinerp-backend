@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -44,8 +45,14 @@ func setupCustomerTestRouter(db *gorm.DB, jwtSecret string) *gin.Engine {
 	api.Use(middleware.AuthRequired(jwtSecret))
 
 	custHandler := NewCustomerHandler(db)
+	txHandler := NewCustomerTransactionHandler(db)
+
 	api.GET("/customers", custHandler.List)
 	api.GET("/customers/:id", custHandler.Get)
+	api.GET("/customers/:id/balance", custHandler.Balance)
+
+	api.GET("/customers/:id/transactions", txHandler.List)
+	api.POST("/customers/:id/transactions", txHandler.Create)
 
 	admin := api.Group("/customers")
 	admin.Use(middleware.RequireAdmin())
@@ -56,12 +63,11 @@ func setupCustomerTestRouter(db *gorm.DB, jwtSecret string) *gin.Engine {
 	return router
 }
 
-func TestCustomerPermissionsAndMobileAccess(t *testing.T) {
+func TestCariCustomerFullRules(t *testing.T) {
 	db := newCustomerTestDB(t)
 	jwtSecret := "test_secret_key"
 	router := setupCustomerTestRouter(db, jwtSecret)
 
-	// Admin and Cashier tokens
 	adminUser := models.User{Username: "admin", Role: "admin", IsActive: true}
 	cashierUser := models.User{Username: "kasiyer", Role: "cashier", IsActive: true}
 	db.Create(&adminUser)
@@ -70,27 +76,16 @@ func TestCustomerPermissionsAndMobileAccess(t *testing.T) {
 	adminToken, _ := services.GenerateJWT(jwtSecret, services.NewAuthClaims(adminUser.ID, adminUser.Username, adminUser.Role))
 	cashierToken, _ := services.GenerateJWT(jwtSecret, services.NewAuthClaims(cashierUser.ID, cashierUser.Username, cashierUser.Role))
 
-	// 1. Cashier attempts to create customer -> 403 Forbidden
-	createPayload := []byte(`{"name": "Test Müşteri", "phone": "05321112233"}`)
+	// 1. Admin cari müşteri oluşturabilir (customer_type = "cari")
+	createPayload := []byte(`{"name": "Ahmet Yılmaz", "phone": "05321112233", "credit_limit": 5000.00}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/customers", bytes.NewReader(createPayload))
-	req.Header.Set("Authorization", "Bearer "+cashierToken)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 
-	if resp.Code != http.StatusForbidden {
-		t.Fatalf("cashier create status = %d, want 403 Forbidden", resp.Code)
-	}
-
-	// 2. Admin creates customer -> 201 Created
-	req = httptest.NewRequest(http.MethodPost, "/api/customers", bytes.NewReader(createPayload))
-	req.Header.Set("Authorization", "Bearer "+adminToken)
-	req.Header.Set("Content-Type", "application/json")
-	resp = httptest.NewRecorder()
-	router.ServeHTTP(resp, req)
-
 	if resp.Code != http.StatusCreated {
-		t.Fatalf("admin create status = %d, want 201 Created; body: %s", resp.Code, resp.Body.String())
+		t.Fatalf("1. admin create status = %d, want 201; body: %s", resp.Code, resp.Body.String())
 	}
 
 	var createRes struct {
@@ -100,86 +95,215 @@ func TestCustomerPermissionsAndMobileAccess(t *testing.T) {
 	json.Unmarshal(resp.Body.Bytes(), &createRes)
 	custID := createRes.Data.ID
 
-	// 3. Admin creates an inactive customer
-	inactivePayload := []byte(`{"name": "Pasif Müşteri", "phone": "05449998877", "is_active": false}`)
-	req = httptest.NewRequest(http.MethodPost, "/api/customers", bytes.NewReader(inactivePayload))
+	if createRes.Data.CustomerType != "cari" {
+		t.Fatalf("1. expected customer_type = 'cari', got %q", createRes.Data.CustomerType)
+	}
+
+	// 2. Cashier cari müşteri oluşturamaz -> 403
+	req = httptest.NewRequest(http.MethodPost, "/api/customers", bytes.NewReader(createPayload))
+	req.Header.Set("Authorization", "Bearer "+cashierToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("2. cashier create status = %d, want 403", resp.Code)
+	}
+
+	// 3. Aynı telefon ikinci kez eklenemez (farklı format ile dene: +905321112233)
+	duplicatePayload := []byte(`{"name": "Ahmet Klon", "phone": "+905321112233"}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/customers", bytes.NewReader(duplicatePayload))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("3. duplicate phone create status = %d, want 400", resp.Code)
+	}
+
+	// 4. Negatif credit_limit reddedilir
+	negativeLimitPayload := []byte(`{"name": "Mehmet", "phone": "05339998877", "credit_limit": -100}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/customers", bytes.NewReader(negativeLimitPayload))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("4. negative credit_limit status = %d, want 400", resp.Code)
+	}
+
+	// 5. Debt bakiyeyi artırır (POST /api/customers/:id/transactions)
+	debtPayload := []byte(`{"type": "debt", "amount": 1250.50, "note": "Market alışverişi"}`)
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/customers/%d/transactions", custID), bytes.NewReader(debtPayload))
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	req.Header.Set("Content-Type", "application/json")
 	resp = httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	if resp.Code != http.StatusCreated {
-		t.Fatalf("create inactive status = %d, want 201", resp.Code)
+		t.Fatalf("5. debt tx status = %d, want 201; body: %s", resp.Code, resp.Body.String())
 	}
 
-	// 4. Cashier lists customers -> should only get active customers (1 active, 0 inactive)
-	req = httptest.NewRequest(http.MethodGet, "/api/customers", nil)
-	req.Header.Set("Authorization", "Bearer "+cashierToken)
+	// Bakiye kontrol et -> 1250.50
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/customers/%d/balance", custID), nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
 	resp = httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
-
 	if resp.Code != http.StatusOK {
-		t.Fatalf("cashier list status = %d, want 200", resp.Code)
+		t.Fatalf("5. balance get status = %d, want 200", resp.Code)
 	}
 
-	var listRes struct {
-		Success bool               `json:"success"`
-		Data    []CustomerResponse `json:"data"`
+	var balanceRes struct {
+		Success bool `json:"success"`
+		Data    struct {
+			CustomerID      uint            `json:"customer_id"`
+			DebtTotal       decimal.Decimal `json:"debt_total"`
+			PaymentTotal    decimal.Decimal `json:"payment_total"`
+			Balance         decimal.Decimal `json:"balance"`
+			LimitExceeded   bool            `json:"limit_exceeded"`
+			AvailableCredit decimal.Decimal `json:"available_credit"`
+		} `json:"data"`
 	}
-	json.Unmarshal(resp.Body.Bytes(), &listRes)
-
-	if len(listRes.Data) != 1 || listRes.Data[0].Name != "Test Müşteri" {
-		t.Fatalf("expected 1 active customer for cashier, got %d", len(listRes.Data))
+	json.Unmarshal(resp.Body.Bytes(), &balanceRes)
+	if !balanceRes.Data.Balance.Equal(decimal.NewFromFloat(1250.50)) {
+		t.Fatalf("5. balance after debt = %s, want 1250.50", balanceRes.Data.Balance.String())
 	}
 
-	// 5. Admin lists customers -> can see all customers
-	req = httptest.NewRequest(http.MethodGet, "/api/customers", nil)
+	// 6. Payment bakiyeyi azaltır
+	paymentPayload := []byte(`{"type": "payment", "amount": 500.00, "note": "Nakit ödeme"}`)
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/customers/%d/transactions", custID), bytes.NewReader(paymentPayload))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("6. payment tx status = %d, want 201", resp.Code)
+	}
+
+	// Bakiye kontrol et -> 1250.50 - 500 = 750.50
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/customers/%d/balance", custID), nil)
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	resp = httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 
-	json.Unmarshal(resp.Body.Bytes(), &listRes)
-	if len(listRes.Data) != 2 {
-		t.Fatalf("expected 2 customers for admin, got %d", len(listRes.Data))
+	json.Unmarshal(resp.Body.Bytes(), &balanceRes)
+	if !balanceRes.Data.Balance.Equal(decimal.NewFromFloat(750.50)) {
+		t.Fatalf("6. balance after payment = %s, want 750.50", balanceRes.Data.Balance.String())
+	}
+	if balanceRes.Data.DebtTotal.Equal(decimal.NewFromFloat(1250.50)) == false || balanceRes.Data.PaymentTotal.Equal(decimal.NewFromFloat(500.00)) == false {
+		t.Fatalf("6. debt_total or payment_total mismatch: debt=%s, pay=%s", balanceRes.Data.DebtTotal, balanceRes.Data.PaymentTotal)
 	}
 
-	// 6. Cashier attempts update/delete -> 403 Forbidden
-	req = httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/customers/%d", custID), nil)
+	// 7. Negatif/0 hareket reddedilir
+	zeroPayload := []byte(`{"type": "debt", "amount": 0}`)
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/customers/%d/transactions", custID), bytes.NewReader(zeroPayload))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("7. zero amount tx status = %d, want 400", resp.Code)
+	}
+
+	// 8. Invalid transaction type reddedilir
+	invalidTypePayload := []byte(`{"type": "refund", "amount": 100}`)
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/customers/%d/transactions", custID), bytes.NewReader(invalidTypePayload))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("8. invalid type tx status = %d, want 400", resp.Code)
+	}
+
+	// Pasif müşteri oluştur
+	inactivePayload := []byte(`{"name": "Pasif Müşteri", "phone": "05441112233", "is_active": false}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/customers", bytes.NewReader(inactivePayload))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	// 9. Pasif müşteri listede admin tarafından görülebilir, cashier göremez
+	req = httptest.NewRequest(http.MethodGet, "/api/customers", nil)
 	req.Header.Set("Authorization", "Bearer "+cashierToken)
 	resp = httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
-	if resp.Code != http.StatusForbidden {
-		t.Fatalf("cashier delete status = %d, want 403", resp.Code)
+	var cashierList struct {
+		Data []CustomerResponse `json:"data"`
+	}
+	json.Unmarshal(resp.Body.Bytes(), &cashierList)
+	if len(cashierList.Data) != 1 {
+		t.Fatalf("9. cashier expected 1 active customer, got %d", len(cashierList.Data))
 	}
 
-	// 7. Mobile Customer Check - matching phone -> has_customer = true
-	req = httptest.NewRequest(http.MethodGet, "/api/mobile/customer/profile?phone=05321112233", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/customers", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
 	resp = httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusOK {
-		t.Fatalf("mobile profile status = %d, want 200", resp.Code)
+	var adminList struct {
+		Data []CustomerResponse `json:"data"`
+	}
+	json.Unmarshal(resp.Body.Bytes(), &adminList)
+	if len(adminList.Data) != 2 {
+		t.Fatalf("9. admin expected 2 customers (active+inactive), got %d", len(adminList.Data))
 	}
 
-	var mobileRes struct {
-		HasCustomer bool `json:"has_customer"`
-		Customer    *struct {
-			ID   uint   `json:"id"`
-			Name string `json:"name"`
+	// 10. Mobil normal kullanıcı cari bilgisine erişemez (bilinmeyen/kayıtsız veya cari olmayan)
+	req = httptest.NewRequest(http.MethodGet, "/api/mobile/customer/profile?phone=05550000000", nil)
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	var mobileNormalRes struct {
+		HasCurrentAccount bool `json:"has_current_account"`
+		HasCustomer       bool `json:"has_customer"`
+	}
+	json.Unmarshal(resp.Body.Bytes(), &mobileNormalRes)
+	if mobileNormalRes.HasCurrentAccount {
+		t.Fatalf("10. non-customer mobile expected has_current_account = false, got true")
+	}
+
+	// 11. Telefon eşleşen aktif cari müşteri erişebilir
+	req = httptest.NewRequest(http.MethodGet, "/api/mobile/customer/profile?phone=5321112233", nil)
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	var mobileCariRes struct {
+		HasCurrentAccount bool `json:"has_current_account"`
+		Customer          *struct {
+			Name    string          `json:"name"`
+			Balance decimal.Decimal `json:"balance"`
 		} `json:"customer"`
 	}
-	json.Unmarshal(resp.Body.Bytes(), &mobileRes)
-
-	if !mobileRes.HasCustomer || mobileRes.Customer == nil || mobileRes.Customer.Name != "Test Müşteri" {
-		t.Fatalf("unexpected mobile profile response: %#v", mobileRes)
+	json.Unmarshal(resp.Body.Bytes(), &mobileCariRes)
+	if !mobileCariRes.HasCurrentAccount || mobileCariRes.Customer == nil || mobileCariRes.Customer.Name != "Ahmet Yılmaz" {
+		t.Fatalf("11. matching mobile customer expected has_current_account = true, got %#v", mobileCariRes)
 	}
 
-	// 8. Mobile Customer Check - non-matching phone -> has_customer = false
-	req = httptest.NewRequest(http.MethodGet, "/api/mobile/customer/profile?phone=05000000000", nil)
+	// 12. Sonradan cari açılan mobil kullanıcı erişebilir
+	mobilePhone := "05077778899"
+	// İlk kontrol -> false
+	req = httptest.NewRequest(http.MethodGet, "/api/mobile/customer/profile?phone="+mobilePhone, nil)
 	resp = httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
+	json.Unmarshal(resp.Body.Bytes(), &mobileNormalRes)
+	if mobileNormalRes.HasCurrentAccount {
+		t.Fatalf("12. before admin opens cari: expected has_current_account = false")
+	}
 
-	json.Unmarshal(resp.Body.Bytes(), &mobileRes)
-	if mobileRes.HasCustomer {
-		t.Fatalf("expected has_customer = false for non-matching phone, got true")
+	// Admin sonradan aynı telefonla cari hesap açar
+	laterPayload := []byte(`{"name": "Sonradan Eklenen Müşteri", "phone": "05077778899"}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/customers", bytes.NewReader(laterPayload))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("12. admin create later customer status = %d, want 201", resp.Code)
+	}
+
+	// Mobil kullanıcı tekrar sorgular -> true
+	req = httptest.NewRequest(http.MethodGet, "/api/mobile/customer/profile?phone="+mobilePhone, nil)
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	json.Unmarshal(resp.Body.Bytes(), &mobileCariRes)
+	if !mobileCariRes.HasCurrentAccount || mobileCariRes.Customer == nil || mobileCariRes.Customer.Name != "Sonradan Eklenen Müşteri" {
+		t.Fatalf("12. after admin opens cari: expected has_current_account = true, got %#v", mobileCariRes)
 	}
 }

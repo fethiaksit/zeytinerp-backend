@@ -11,7 +11,7 @@ type Customer struct {
 	Name         string           `json:"name" gorm:"not null"`
 	Phone        string           `json:"phone"`
 	Address      string           `json:"address"`
-	CustomerType string           `json:"customer_type" gorm:"not null;default:normal"`
+	CustomerType string           `json:"customer_type" gorm:"not null;default:cari"`
 	Note         string           `json:"note"`
 	IsActive     bool             `json:"is_active" gorm:"not null"`
 	CreditLimit  *decimal.Decimal `json:"credit_limit"`

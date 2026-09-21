@@ -245,6 +245,71 @@ func EmployeeBalances(db *gorm.DB) ([]EmployeeBalanceRow, error) {
 	return result, nil
 }
 
+type CustomerBalanceDetailsResult struct {
+	CustomerID      uint             `json:"customer_id"`
+	DebtTotal       decimal.Decimal  `json:"debt_total"`
+	PaymentTotal    decimal.Decimal  `json:"payment_total"`
+	Balance         decimal.Decimal  `json:"balance"`
+	CreditLimit     *decimal.Decimal `json:"credit_limit"`
+	AvailableCredit *decimal.Decimal `json:"available_credit"`
+	LimitExceeded   bool             `json:"limit_exceeded"`
+}
+
+func CustomerBalanceDetails(db *gorm.DB, customerID uint) (CustomerBalanceDetailsResult, error) {
+	var query string
+	if db.Dialector.Name() == "sqlite" {
+		query = `
+			SELECT 
+				CAST(COALESCE(SUM(CASE WHEN type = 'debt' THEN amount ELSE 0 END), 0) AS TEXT) AS debt_total,
+				CAST(COALESCE(SUM(CASE WHEN type = 'payment' THEN amount ELSE 0 END), 0) AS TEXT) AS payment_total
+			FROM customer_transactions
+			WHERE customer_id = ?
+		`
+	} else {
+		query = `
+			SELECT 
+				COALESCE(SUM(CASE WHEN type = 'debt' THEN amount ELSE 0 END), 0)::text AS debt_total,
+				COALESCE(SUM(CASE WHEN type = 'payment' THEN amount ELSE 0 END), 0)::text AS payment_total
+			FROM customer_transactions
+			WHERE customer_id = ?
+		`
+	}
+
+	row := struct {
+		DebtTotal    string
+		PaymentTotal string
+	}{}
+
+	if err := db.Raw(query, customerID).Scan(&row).Error; err != nil {
+		return CustomerBalanceDetailsResult{}, err
+	}
+
+	debtTotal, _ := decimal.NewFromString(row.DebtTotal)
+	paymentTotal, _ := decimal.NewFromString(row.PaymentTotal)
+	balance := debtTotal.Sub(paymentTotal)
+
+	var cust struct {
+		CreditLimit *decimal.Decimal
+	}
+	db.Table("customers").Select("credit_limit").Where("id = ?", customerID).Scan(&cust)
+
+	res := CustomerBalanceDetailsResult{
+		CustomerID:   customerID,
+		DebtTotal:    debtTotal,
+		PaymentTotal: paymentTotal,
+		Balance:      balance,
+		CreditLimit:  cust.CreditLimit,
+	}
+
+	if cust.CreditLimit != nil {
+		avail := cust.CreditLimit.Sub(balance)
+		res.AvailableCredit = &avail
+		res.LimitExceeded = balance.GreaterThan(*cust.CreditLimit)
+	}
+
+	return res, nil
+}
+
 func CustomerBalance(db *gorm.DB, customerID uint) (decimal.Decimal, error) {
 	if db.Dialector.Name() == "sqlite" {
 		return decimalFromQuery(db, `

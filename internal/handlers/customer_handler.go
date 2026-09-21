@@ -11,6 +11,7 @@ import (
 
 	"market-erp-backend/internal/models"
 	"market-erp-backend/internal/services"
+	"market-erp-backend/internal/utils"
 )
 
 type CustomerHandler struct {
@@ -79,7 +80,7 @@ func checkAdminRole(c *gin.Context) bool {
 	return strings.EqualFold(role, "admin")
 }
 
-// POST /api/customers
+// POST /api/admin/customers
 func (h *CustomerHandler) Create(c *gin.Context) {
 	if !checkAdminRole(c) {
 		fail(c, http.StatusForbidden, "forbidden: only administrators can create customers")
@@ -98,17 +99,21 @@ func (h *CustomerHandler) Create(c *gin.Context) {
 		return
 	}
 
-	phone := strings.TrimSpace(req.Phone)
-	if phone != "" {
-		var count int64
-		if err := h.DB.Model(&models.Customer{}).Where("phone = ?", phone).Count(&count).Error; err != nil {
-			handleDBError(c, err)
-			return
-		}
-		if count > 0 {
-			fail(c, http.StatusBadRequest, "Bu telefon numarasıyla kayıtlı bir cari müşteri zaten bulunuyor.")
-			return
-		}
+	phone := utils.NormalizePhone(req.Phone)
+	if phone == "" {
+		fail(c, http.StatusBadRequest, "phone is required")
+		return
+	}
+
+	variants := utils.PhoneVariants(phone)
+	var count int64
+	if err := h.DB.Model(&models.Customer{}).Where("phone IN ?", variants).Count(&count).Error; err != nil {
+		handleDBError(c, err)
+		return
+	}
+	if count > 0 {
+		fail(c, http.StatusBadRequest, "Bu telefon numarasıyla kayıtlı bir cari müşteri zaten bulunuyor.")
+		return
 	}
 
 	if req.CreditLimit != nil && req.CreditLimit.IsNegative() {
@@ -125,7 +130,7 @@ func (h *CustomerHandler) Create(c *gin.Context) {
 		Name:         name,
 		Phone:        phone,
 		Address:      strings.TrimSpace(req.Address),
-		CustomerType: "normal",
+		CustomerType: "cari",
 		Note:         strings.TrimSpace(req.Note),
 		IsActive:     isActive,
 		CreditLimit:  req.CreditLimit,
@@ -159,7 +164,12 @@ func (h *CustomerHandler) List(c *gin.Context) {
 	}
 
 	if q := strings.TrimSpace(strings.ToLower(c.Query("q"))); q != "" {
-		query = query.Where("LOWER(name) LIKE ? OR phone LIKE ?", "%"+q+"%", "%"+q+"%")
+		normQ := utils.NormalizePhone(q)
+		if normQ != "" {
+			query = query.Where("LOWER(name) LIKE ? OR phone IN ?", "%"+q+"%", utils.PhoneVariants(normQ))
+		} else {
+			query = query.Where("LOWER(name) LIKE ? OR phone LIKE ?", "%"+q+"%", "%"+q+"%")
+		}
 	}
 
 	var customers []models.Customer
@@ -197,7 +207,7 @@ func (h *CustomerHandler) Get(c *gin.Context) {
 	ok(c, toCustomerResponse(h.DB, customer))
 }
 
-// PUT /api/customers/:id
+// PUT /api/admin/customers/:id
 func (h *CustomerHandler) Update(c *gin.Context) {
 	if !checkAdminRole(c) {
 		fail(c, http.StatusForbidden, "forbidden: only administrators can edit customers")
@@ -227,16 +237,25 @@ func (h *CustomerHandler) Update(c *gin.Context) {
 		return
 	}
 
-	phone := strings.TrimSpace(req.Phone)
-	if phone != "" && phone != customer.Phone {
-		var count int64
-		if err := h.DB.Model(&models.Customer{}).Where("phone = ? AND id <> ?", phone, id).Count(&count).Error; err != nil {
-			handleDBError(c, err)
+	if req.Phone != "" {
+		phone := utils.NormalizePhone(req.Phone)
+		if phone == "" {
+			fail(c, http.StatusBadRequest, "phone is invalid")
 			return
 		}
-		if count > 0 {
-			fail(c, http.StatusBadRequest, "Bu telefon numarasıyla kayıtlı bir cari müşteri zaten bulunuyor.")
-			return
+
+		if phone != customer.Phone {
+			variants := utils.PhoneVariants(phone)
+			var count int64
+			if err := h.DB.Model(&models.Customer{}).Where("phone IN ? AND id <> ?", variants, id).Count(&count).Error; err != nil {
+				handleDBError(c, err)
+				return
+			}
+			if count > 0 {
+				fail(c, http.StatusBadRequest, "Bu telefon numarasıyla kayıtlı bir cari müşteri zaten bulunuyor.")
+				return
+			}
+			customer.Phone = phone
 		}
 	}
 
@@ -246,7 +265,6 @@ func (h *CustomerHandler) Update(c *gin.Context) {
 	}
 
 	customer.Name = name
-	customer.Phone = phone
 	customer.Address = strings.TrimSpace(req.Address)
 	customer.Note = strings.TrimSpace(req.Note)
 	if req.IsActive != nil {
@@ -262,7 +280,7 @@ func (h *CustomerHandler) Update(c *gin.Context) {
 	ok(c, toCustomerResponse(h.DB, customer))
 }
 
-// DELETE /api/customers/:id
+// DELETE /api/admin/customers/:id
 func (h *CustomerHandler) Delete(c *gin.Context) {
 	if !checkAdminRole(c) {
 		fail(c, http.StatusForbidden, "forbidden: only administrators can delete/deactivate customers")
@@ -300,10 +318,10 @@ func (h *CustomerHandler) Balance(c *gin.Context) {
 		handleDBError(c, err)
 		return
 	}
-	balance, err := services.CustomerBalance(h.DB, id)
+	details, err := services.CustomerBalanceDetails(h.DB, id)
 	if err != nil {
 		handleDBError(c, err)
 		return
 	}
-	ok(c, gin.H{"customer_id": id, "balance": balance})
+	ok(c, details)
 }

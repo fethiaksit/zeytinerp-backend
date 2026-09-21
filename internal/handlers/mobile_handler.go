@@ -11,6 +11,7 @@ import (
 
 	"market-erp-backend/internal/models"
 	"market-erp-backend/internal/services"
+	"market-erp-backend/internal/utils"
 )
 
 type MobileHandler struct {
@@ -225,18 +226,20 @@ func (h *MobileHandler) Categories(c *gin.Context) {
 // GET /api/mobile/customer/profile
 func (h *MobileHandler) GetCustomerProfile(c *gin.Context) {
 	phoneStr := strings.TrimSpace(c.Query("phone"))
-	if phoneStr == "" {
-		c.JSON(http.StatusOK, gin.H{"has_customer": false, "customer": nil})
+	normPhone := utils.NormalizePhone(phoneStr)
+	if normPhone == "" {
+		c.JSON(http.StatusOK, gin.H{"has_current_account": false, "has_customer": false, "customer": nil})
 		return
 	}
 
+	variants := utils.PhoneVariants(normPhone)
 	var customer models.Customer
-	if err := h.DB.Where("(phone = ? OR REPLACE(phone, ' ', '') = REPLACE(?, ' ', '')) AND is_active = true", phoneStr, phoneStr).First(&customer).Error; err != nil {
-		c.JSON(http.StatusOK, gin.H{"has_customer": false, "customer": nil})
+	if err := h.DB.Where("phone IN ? AND is_active = true AND customer_type = 'cari'", variants).First(&customer).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"has_current_account": false, "has_customer": false, "customer": nil})
 		return
 	}
 
-	balance, _ := services.CustomerBalance(h.DB, customer.ID)
+	details, _ := services.CustomerBalanceDetails(h.DB, customer.ID)
 
 	var lastPurchaseAt *string
 	var lastSaleDate string
@@ -246,22 +249,28 @@ func (h *MobileHandler) GetCustomerProfile(c *gin.Context) {
 		dateCast = "created_at"
 	}
 	if err := h.DB.Raw(`
-		SELECT ` + dateCast + ` FROM sales WHERE created_by IN (SELECT id FROM users WHERE phone = ?) OR id IN (SELECT sale_id FROM customer_transactions WHERE customer_id = ? AND sale_id IS NOT NULL) ORDER BY created_at DESC LIMIT 1
-	`, phoneStr, customer.ID).Scan(&lastSaleDate).Error; err == nil && lastSaleDate != "" {
+		SELECT ` + dateCast + ` FROM sales WHERE created_by IN (SELECT id FROM users WHERE phone IN ?) OR id IN (SELECT sale_id FROM customer_transactions WHERE customer_id = ? AND sale_id IS NOT NULL) ORDER BY created_at DESC LIMIT 1
+	`, variants, customer.ID).Scan(&lastSaleDate).Error; err == nil && lastSaleDate != "" {
 		lastPurchaseAt = &lastSaleDate
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"has_customer": true,
+		"has_current_account": true,
+		"has_customer":        true,
 		"customer": gin.H{
 			"id":               customer.ID,
 			"name":             customer.Name,
 			"phone":            customer.Phone,
 			"address":          customer.Address,
+			"customer_type":    customer.CustomerType,
 			"note":             customer.Note,
 			"is_active":        customer.IsActive,
 			"credit_limit":     customer.CreditLimit,
-			"balance":          balance,
+			"balance":          details.Balance,
+			"debt_total":       details.DebtTotal,
+			"payment_total":    details.PaymentTotal,
+			"available_credit": details.AvailableCredit,
+			"limit_exceeded":   details.LimitExceeded,
 			"last_purchase_at": lastPurchaseAt,
 			"created_at":       customer.CreatedAt,
 		},
@@ -271,13 +280,15 @@ func (h *MobileHandler) GetCustomerProfile(c *gin.Context) {
 // GET /api/mobile/customer/transactions
 func (h *MobileHandler) GetCustomerTransactions(c *gin.Context) {
 	phoneStr := strings.TrimSpace(c.Query("phone"))
-	if phoneStr == "" {
+	normPhone := utils.NormalizePhone(phoneStr)
+	if normPhone == "" {
 		c.JSON(http.StatusOK, []interface{}{})
 		return
 	}
 
+	variants := utils.PhoneVariants(normPhone)
 	var customer models.Customer
-	if err := h.DB.Where("(phone = ? OR REPLACE(phone, ' ', '') = REPLACE(?, ' ', '')) AND is_active = true", phoneStr, phoneStr).First(&customer).Error; err != nil {
+	if err := h.DB.Where("phone IN ? AND is_active = true AND customer_type = 'cari'", variants).First(&customer).Error; err != nil {
 		c.JSON(http.StatusOK, []interface{}{})
 		return
 	}
