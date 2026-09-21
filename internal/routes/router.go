@@ -34,6 +34,8 @@ func SetupRouter(db *gorm.DB, jwtSecret string, corsAllowedOrigins []string) *gi
 		mobile.GET("/products/new-arrivals", mobileHandler.ListProducts)
 		mobile.GET("/products/price-drops", mobileHandler.ListProducts)
 		mobile.GET("/categories", mobileHandler.Categories)
+		mobile.GET("/customer/profile", mobileHandler.GetCustomerProfile)
+		mobile.GET("/customer/transactions", mobileHandler.GetCustomerTransactions)
 	}
 
 	auth := router.Group("/api/auth")
@@ -60,6 +62,8 @@ func SetupRouter(db *gorm.DB, jwtSecret string, corsAllowedOrigins []string) *gi
 	RegisterWalletRoutes(api, db)
 	RegisterProductRoutes(api, db)
 	RegisterStockMovementRoutes(api, db)
+	RegisterCustomerRoutes(api, db)
+	RegisterCustomerTransactionRoutes(api, db)
 
 	return router
 }

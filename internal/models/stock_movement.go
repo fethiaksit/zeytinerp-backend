@@ -15,5 +15,5 @@ type StockMovement struct {
 	UnitPrice    decimal.Decimal `json:"unit_price" gorm:"type:numeric(12,2);not null"`
 	Note         string          `json:"note"`
 	CreatedAt    time.Time       `json:"created_at"`
-	Product      Product         `json:"-" gorm:"constraint:OnDelete:CASCADE"`
+	Product      Product         `json:"product,omitempty" gorm:"foreignKey:ProductID;constraint:OnDelete:CASCADE"`
 }

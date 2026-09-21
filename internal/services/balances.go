@@ -246,6 +246,13 @@ func EmployeeBalances(db *gorm.DB) ([]EmployeeBalanceRow, error) {
 }
 
 func CustomerBalance(db *gorm.DB, customerID uint) (decimal.Decimal, error) {
+	if db.Dialector.Name() == "sqlite" {
+		return decimalFromQuery(db, `
+			SELECT CAST(COALESCE(SUM(CASE WHEN type = 'debt' THEN amount WHEN type = 'payment' THEN -amount ELSE 0 END), 0) AS TEXT)
+			FROM customer_transactions
+			WHERE customer_id = ?
+		`, customerID)
+	}
 	return decimalFromQuery(db, `
 		SELECT COALESCE(SUM(CASE WHEN type = 'debt' THEN amount WHEN type = 'payment' THEN -amount ELSE 0 END), 0)::text
 		FROM customer_transactions
@@ -254,6 +261,12 @@ func CustomerBalance(db *gorm.DB, customerID uint) (decimal.Decimal, error) {
 }
 
 func TotalCustomerBalance(db *gorm.DB) (decimal.Decimal, error) {
+	if db.Dialector.Name() == "sqlite" {
+		return decimalFromQuery(db, `
+			SELECT CAST(COALESCE(SUM(CASE WHEN type = 'debt' THEN amount WHEN type = 'payment' THEN -amount ELSE 0 END), 0) AS TEXT)
+			FROM customer_transactions
+		`)
+	}
 	return decimalFromQuery(db, `
 		SELECT COALESCE(SUM(CASE WHEN type = 'debt' THEN amount WHEN type = 'payment' THEN -amount ELSE 0 END), 0)::text
 		FROM customer_transactions

@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"market-erp-backend/internal/models"
+	"market-erp-backend/internal/services"
 )
 
 type MobileHandler struct {
@@ -219,4 +220,73 @@ func (h *MobileHandler) Categories(c *gin.Context) {
 		result = append(result, MobileCategoryDto{ID: r.Category, Name: r.Category})
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// GET /api/mobile/customer/profile
+func (h *MobileHandler) GetCustomerProfile(c *gin.Context) {
+	phoneStr := strings.TrimSpace(c.Query("phone"))
+	if phoneStr == "" {
+		c.JSON(http.StatusOK, gin.H{"has_customer": false, "customer": nil})
+		return
+	}
+
+	var customer models.Customer
+	if err := h.DB.Where("(phone = ? OR REPLACE(phone, ' ', '') = REPLACE(?, ' ', '')) AND is_active = true", phoneStr, phoneStr).First(&customer).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"has_customer": false, "customer": nil})
+		return
+	}
+
+	balance, _ := services.CustomerBalance(h.DB, customer.ID)
+
+	var lastPurchaseAt *string
+	var lastSaleDate string
+
+	dateCast := "created_at::text"
+	if h.DB.Dialector.Name() == "sqlite" {
+		dateCast = "created_at"
+	}
+	if err := h.DB.Raw(`
+		SELECT ` + dateCast + ` FROM sales WHERE created_by IN (SELECT id FROM users WHERE phone = ?) OR id IN (SELECT sale_id FROM customer_transactions WHERE customer_id = ? AND sale_id IS NOT NULL) ORDER BY created_at DESC LIMIT 1
+	`, phoneStr, customer.ID).Scan(&lastSaleDate).Error; err == nil && lastSaleDate != "" {
+		lastPurchaseAt = &lastSaleDate
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"has_customer": true,
+		"customer": gin.H{
+			"id":               customer.ID,
+			"name":             customer.Name,
+			"phone":            customer.Phone,
+			"address":          customer.Address,
+			"note":             customer.Note,
+			"is_active":        customer.IsActive,
+			"credit_limit":     customer.CreditLimit,
+			"balance":          balance,
+			"last_purchase_at": lastPurchaseAt,
+			"created_at":       customer.CreatedAt,
+		},
+	})
+}
+
+// GET /api/mobile/customer/transactions
+func (h *MobileHandler) GetCustomerTransactions(c *gin.Context) {
+	phoneStr := strings.TrimSpace(c.Query("phone"))
+	if phoneStr == "" {
+		c.JSON(http.StatusOK, []interface{}{})
+		return
+	}
+
+	var customer models.Customer
+	if err := h.DB.Where("(phone = ? OR REPLACE(phone, ' ', '') = REPLACE(?, ' ', '')) AND is_active = true", phoneStr, phoneStr).First(&customer).Error; err != nil {
+		c.JSON(http.StatusOK, []interface{}{})
+		return
+	}
+
+	var txs []models.CustomerTransaction
+	if err := h.DB.Where("customer_id = ?", customer.ID).Order("transaction_date desc, id desc").Find(&txs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "fetch transactions failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, txs)
 }

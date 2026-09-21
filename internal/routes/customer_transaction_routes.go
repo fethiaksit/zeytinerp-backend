@@ -12,4 +12,11 @@ func RegisterCustomerTransactionRoutes(api *gin.RouterGroup, db *gorm.DB) {
 	api.POST("/customer-transactions", handler.Create)
 	api.GET("/customer-transactions", handler.List)
 	api.DELETE("/customer-transactions/:id", handler.Delete)
+
+	admin := api.Group("/admin")
+	{
+		admin.POST("/customer-transactions", handler.Create)
+		admin.GET("/customer-transactions", handler.List)
+		admin.DELETE("/customer-transactions/:id", handler.Delete)
+	}
 }
