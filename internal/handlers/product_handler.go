@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -24,7 +25,41 @@ type productRequest struct {
 	IsActive      *bool           `json:"is_active"`
 }
 
+type productResponse struct {
+	ID              uint            `json:"id"`
+	Name            string          `json:"name"`
+	Barcode         *string         `json:"barcode"`
+	Category        string          `json:"category"`
+	Brand           string          `json:"brand"`
+	Description     string          `json:"description"`
+	ImageURL        string          `json:"image_url"`
+	IsBestseller    bool            `json:"is_bestseller"`
+	BestsellerOrder int             `json:"bestseller_order"`
+	PurchasePrice   decimal.Decimal `json:"purchase_price"`
+	SalePrice       decimal.Decimal `json:"sale_price"`
+	CriticalStock   decimal.Decimal `json:"critical_stock"`
+	Stock           decimal.Decimal `json:"stock"`
+	IsActive        bool            `json:"is_active"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
 func NewProductHandler(db *gorm.DB) *ProductHandler { return &ProductHandler{DB: db} }
+
+func (h *ProductHandler) toResponse(product models.Product) (productResponse, error) {
+	stock, err := services.ProductStock(h.DB, product.ID)
+	if err != nil {
+		return productResponse{}, err
+	}
+	return productResponse{
+		ID: product.ID, Name: product.Name, Barcode: product.Barcode,
+		Category: product.Category, Brand: product.Brand, Description: product.Description,
+		ImageURL: product.ImageURL, IsBestseller: product.IsBestseller,
+		BestsellerOrder: product.BestsellerOrder, PurchasePrice: product.PurchasePrice,
+		SalePrice: product.SalePrice, CriticalStock: product.CriticalStock, Stock: stock,
+		IsActive: product.IsActive, CreatedAt: product.CreatedAt, UpdatedAt: product.UpdatedAt,
+	}, nil
+}
 
 func (h *ProductHandler) Create(c *gin.Context) {
 	var req productRequest
@@ -41,7 +76,12 @@ func (h *ProductHandler) Create(c *gin.Context) {
 		handleDBError(c, err)
 		return
 	}
-	created(c, product)
+	resp, err := h.toResponse(product)
+	if err != nil {
+		handleDBError(c, err)
+		return
+	}
+	created(c, resp)
 }
 
 func (h *ProductHandler) List(c *gin.Context) {
@@ -50,7 +90,16 @@ func (h *ProductHandler) List(c *gin.Context) {
 		handleDBError(c, err)
 		return
 	}
-	ok(c, products)
+	responses := make([]productResponse, 0, len(products))
+	for _, product := range products {
+		resp, err := h.toResponse(product)
+		if err != nil {
+			handleDBError(c, err)
+			return
+		}
+		responses = append(responses, resp)
+	}
+	ok(c, responses)
 }
 
 func (h *ProductHandler) Get(c *gin.Context) {
@@ -63,7 +112,31 @@ func (h *ProductHandler) Get(c *gin.Context) {
 		handleDBError(c, err)
 		return
 	}
-	ok(c, product)
+	resp, err := h.toResponse(product)
+	if err != nil {
+		handleDBError(c, err)
+		return
+	}
+	ok(c, resp)
+}
+
+func (h *ProductHandler) GetByBarcode(c *gin.Context) {
+	barcode := strings.TrimSpace(c.Param("barcode"))
+	if barcode == "" {
+		fail(c, http.StatusBadRequest, "Barkod zorunludur.")
+		return
+	}
+	var product models.Product
+	if err := h.DB.Where("barcode = ?", barcode).First(&product).Error; err != nil {
+		handleDBError(c, err)
+		return
+	}
+	resp, err := h.toResponse(product)
+	if err != nil {
+		handleDBError(c, err)
+		return
+	}
+	ok(c, resp)
 }
 
 func (h *ProductHandler) Update(c *gin.Context) {
@@ -92,7 +165,12 @@ func (h *ProductHandler) Update(c *gin.Context) {
 		handleDBError(c, err)
 		return
 	}
-	ok(c, product)
+	resp, err := h.toResponse(product)
+	if err != nil {
+		handleDBError(c, err)
+		return
+	}
+	ok(c, resp)
 }
 
 func (h *ProductHandler) Delete(c *gin.Context) {
@@ -144,7 +222,8 @@ func (r productRequest) toModel() (models.Product, error) {
 	}
 	var barcode *string
 	if strings.TrimSpace(r.Barcode) != "" {
-		barcode = &r.Barcode
+		clean := strings.TrimSpace(r.Barcode)
+		barcode = &clean
 	}
 	return models.Product{Name: r.Name, Barcode: barcode, Category: r.Category, PurchasePrice: r.PurchasePrice, SalePrice: r.SalePrice, CriticalStock: r.CriticalStock, IsActive: active}, nil
 }
