@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -42,6 +43,32 @@ type productResponse struct {
 	IsActive        bool            `json:"is_active"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
+
+type bulkImportItem struct {
+	LineNumber    int             `json:"lineNumber"`
+	Barcode       string          `json:"barcode"`
+	Name          string          `json:"name"`
+	Price         decimal.Decimal `json:"price"`
+	PurchasePrice decimal.Decimal `json:"purchasePrice"`
+	Stock         decimal.Decimal `json:"stock"`
+	Category      string          `json:"category"`
+	Unit          string          `json:"unit"`
+	Status        string          `json:"status"`
+}
+
+type bulkImportRequest struct {
+	Items          []bulkImportItem `json:"items"`
+	ExistingAction string           `json:"existingAction"`
+	CreatedBy      string           `json:"createdBy"`
+}
+
+type bulkImportResponse struct {
+	Created    int `json:"created"`
+	Updated    int `json:"updated"`
+	Skipped    int `json:"skipped"`
+	StockAdded int `json:"stockAdded"`
 }
 
 func NewProductHandler(db *gorm.DB) *ProductHandler { return &ProductHandler{DB: db} }
@@ -137,6 +164,135 @@ func (h *ProductHandler) GetByBarcode(c *gin.Context) {
 		return
 	}
 	ok(c, resp)
+}
+
+func (h *ProductHandler) BulkImport(c *gin.Context) {
+	var req bulkImportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "CSV aktarım verisi okunamadı.")
+		return
+	}
+	if len(req.Items) == 0 {
+		fail(c, http.StatusBadRequest, "Aktarılacak ürün bulunamadı.")
+		return
+	}
+
+	action := strings.ToUpper(strings.TrimSpace(req.ExistingAction))
+	if action == "" {
+		action = "UPDATE_INFO"
+	}
+	if action != "UPDATE_INFO" && action != "ADD_STOCK_ONLY" && action != "SKIP" {
+		fail(c, http.StatusBadRequest, "Geçersiz mevcut ürün işlemi.")
+		return
+	}
+
+	result := bulkImportResponse{}
+	today := time.Now()
+
+	err := h.DB.Transaction(func(tx *gorm.DB) error {
+		for _, item := range req.Items {
+			if strings.EqualFold(strings.TrimSpace(item.Status), "ERROR") {
+				result.Skipped++
+				continue
+			}
+
+			barcode := strings.TrimSpace(item.Barcode)
+			name := strings.TrimSpace(item.Name)
+			category := strings.TrimSpace(item.Category)
+
+			if barcode == "" || name == "" {
+				result.Skipped++
+				continue
+			}
+			if item.Price.IsNegative() || item.PurchasePrice.IsNegative() || item.Stock.IsNegative() {
+				return errInvalidType("CSV fiyat/stok")
+			}
+
+			var product models.Product
+			findErr := tx.Where("barcode = ?", barcode).First(&product).Error
+
+			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				active := true
+				product = models.Product{
+					Name:          name,
+					Barcode:       &barcode,
+					Category:      category,
+					PurchasePrice: item.PurchasePrice,
+					SalePrice:     item.Price,
+					CriticalStock: decimal.Zero,
+					IsActive:      active,
+				}
+				if err := tx.Create(&product).Error; err != nil {
+					return err
+				}
+
+				if item.Stock.GreaterThan(decimal.Zero) {
+					movement := models.StockMovement{
+						ProductID:    product.ID,
+						MovementDate: today,
+						Type:         "in",
+						Quantity:     item.Stock,
+						UnitPrice:    item.PurchasePrice,
+						Note:         "CSV ile ilk stok girişi",
+					}
+					if err := tx.Create(&movement).Error; err != nil {
+						return err
+					}
+					result.StockAdded++
+				}
+				result.Created++
+				continue
+			}
+			if findErr != nil {
+				return findErr
+			}
+
+			switch action {
+			case "SKIP":
+				result.Skipped++
+
+			case "UPDATE_INFO":
+				updates := map[string]interface{}{
+					"name":       name,
+					"sale_price": item.Price,
+					"category":   category,
+					"updated_at": time.Now(),
+				}
+				if !item.PurchasePrice.IsZero() {
+					updates["purchase_price"] = item.PurchasePrice
+				}
+				if err := tx.Model(&product).Updates(updates).Error; err != nil {
+					return err
+				}
+				result.Updated++
+
+			case "ADD_STOCK_ONLY":
+				if item.Stock.GreaterThan(decimal.Zero) {
+					movement := models.StockMovement{
+						ProductID:    product.ID,
+						MovementDate: today,
+						Type:         "in",
+						Quantity:     item.Stock,
+						UnitPrice:    item.PurchasePrice,
+						Note:         "CSV ile toplu stok girişi",
+					}
+					if err := tx.Create(&movement).Error; err != nil {
+						return err
+					}
+					result.StockAdded++
+				} else {
+					result.Skipped++
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		handleDBError(c, err)
+		return
+	}
+
+	ok(c, result)
 }
 
 func (h *ProductHandler) Update(c *gin.Context) {
