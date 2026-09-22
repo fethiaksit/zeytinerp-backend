@@ -11,6 +11,7 @@ func RegisterProductRoutes(api *gin.RouterGroup, db *gorm.DB) {
 	handler := handlers.NewProductHandler(db)
 	api.POST("/products", handler.Create)
 	api.GET("/products", handler.List)
+	api.POST("/products/bulk-import", handler.BulkImport)
 	api.GET("/products/barcode/:barcode", handler.GetByBarcode)
 	api.GET("/products/:id", handler.Get)
 	api.PUT("/products/:id", handler.Update)
