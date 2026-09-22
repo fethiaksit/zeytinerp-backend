@@ -63,6 +63,7 @@ func SetupRouter(db *gorm.DB, jwtSecret string, corsAllowedOrigins []string) *gi
 	RegisterProductRoutes(api, db)
 	RegisterCategoryRoutes(api, db)
 	RegisterStockMovementRoutes(api, db)
+	RegisterSaleRoutes(api, db)
 	RegisterCustomerRoutes(api, db)
 	RegisterCustomerTransactionRoutes(api, db)
 
