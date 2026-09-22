@@ -9,6 +9,7 @@ import (
 type CustomerTransaction struct {
 	ID              uint            `json:"id" gorm:"primaryKey"`
 	CustomerID      uint            `json:"customer_id" gorm:"not null;index"`
+	SaleID          *uint           `json:"sale_id" gorm:"index"`
 	TransactionDate time.Time       `json:"transaction_date" gorm:"type:date;not null"`
 	Type            string          `json:"type" gorm:"not null"`
 	Amount          decimal.Decimal `json:"amount" gorm:"type:numeric(12,2);not null"`
