@@ -61,6 +61,7 @@ func SetupRouter(db *gorm.DB, jwtSecret string, corsAllowedOrigins []string) *gi
 	RegisterBankWalletRoutes(api, db)
 	RegisterWalletRoutes(api, db)
 	RegisterProductRoutes(api, db)
+	RegisterCategoryRoutes(api, db)
 	RegisterStockMovementRoutes(api, db)
 	RegisterCustomerRoutes(api, db)
 	RegisterCustomerTransactionRoutes(api, db)
