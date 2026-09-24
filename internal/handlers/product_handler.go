@@ -26,6 +26,12 @@ type productRequest struct {
 	IsActive      *bool           `json:"is_active"`
 }
 
+type productFavoriteRequest struct {
+	IsFavorite bool `json:"isFavorite"`
+}
+
+var errFavoriteLimit = errors.New("En fazla 10 favori ürün seçebilirsiniz.")
+
 type productResponse struct {
 	ID              uint            `json:"id"`
 	Name            string          `json:"name"`
@@ -44,7 +50,6 @@ type productResponse struct {
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 }
-
 
 type bulkImportItem struct {
 	LineNumber    int             `json:"lineNumber"`
@@ -318,6 +323,78 @@ func (h *ProductHandler) Update(c *gin.Context) {
 	product.ID = existing.ID
 	product.CreatedAt = existing.CreatedAt
 	if err := h.DB.Save(&product).Error; err != nil {
+		handleDBError(c, err)
+		return
+	}
+	resp, err := h.toResponse(product)
+	if err != nil {
+		handleDBError(c, err)
+		return
+	}
+	ok(c, resp)
+}
+
+func (h *ProductHandler) ToggleFavorite(c *gin.Context) {
+	id, valid := parseID(c)
+	if !valid {
+		return
+	}
+
+	var req productFavoriteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	err := h.DB.Transaction(func(tx *gorm.DB) error {
+		var product models.Product
+		if err := tx.Where("id = ? AND is_active = ?", id, true).First(&product).Error; err != nil {
+			return err
+		}
+
+		if req.IsFavorite {
+			if product.IsBestseller {
+				return nil
+			}
+
+			var favoriteCount int64
+			if err := tx.Model(&models.Product{}).
+				Where("is_active = ? AND is_bestseller = ?", true, true).
+				Count(&favoriteCount).Error; err != nil {
+				return err
+			}
+			if favoriteCount >= 10 {
+				return errFavoriteLimit
+			}
+			var nextOrder int
+			if err := tx.Model(&models.Product{}).
+				Select("COALESCE(MAX(bestseller_order), 0)").
+				Scan(&nextOrder).Error; err != nil {
+				return err
+			}
+
+			return tx.Model(&product).Updates(map[string]interface{}{
+				"is_bestseller":    true,
+				"bestseller_order": nextOrder + 1,
+			}).Error
+		}
+
+		return tx.Model(&product).Updates(map[string]interface{}{
+			"is_bestseller":    false,
+			"bestseller_order": 0,
+		}).Error
+	})
+	if errors.Is(err, errFavoriteLimit) {
+		fail(c, http.StatusConflict, errFavoriteLimit.Error())
+		return
+	}
+	if err != nil {
+		handleDBError(c, err)
+		return
+	}
+
+	var product models.Product
+	if err := h.DB.First(&product, id).Error; err != nil {
 		handleDBError(c, err)
 		return
 	}
