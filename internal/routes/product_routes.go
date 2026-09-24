@@ -15,6 +15,7 @@ func RegisterProductRoutes(api *gin.RouterGroup, db *gorm.DB) {
 	api.GET("/products/barcode/:barcode", handler.GetByBarcode)
 	api.GET("/products/:id", handler.Get)
 	api.PUT("/products/:id", handler.Update)
+	api.PUT("/products/:id/favorite", handler.ToggleFavorite)
 	api.DELETE("/products/:id", handler.Delete)
 	api.GET("/products/:id/stock", handler.Stock)
 }

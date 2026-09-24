@@ -339,6 +339,17 @@ func TotalCustomerBalance(db *gorm.DB) (decimal.Decimal, error) {
 }
 
 func ProductStock(db *gorm.DB, productID uint) (decimal.Decimal, error) {
+	if db.Dialector.Name() == "sqlite" {
+		return decimalFromQuery(db, `
+			SELECT CAST(COALESCE(SUM(CASE
+				WHEN type IN ('in', 'correction') THEN quantity
+				WHEN type IN ('out', 'waste') THEN -quantity
+				ELSE 0
+			END), 0) AS TEXT)
+			FROM stock_movements
+			WHERE product_id = ?
+		`, productID)
+	}
 	return decimalFromQuery(db, `
 		SELECT COALESCE(SUM(CASE
 			WHEN type IN ('in', 'correction') THEN quantity
