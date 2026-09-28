@@ -735,3 +735,21 @@ Cüzdan açılış bakiyesi:
 - Para analizi gelirini günlük kasa cirosu ve `income_entries` kayıtlarından hesaplar. Gider tarafına gider kayıtları, yalnızca `cash` yöntemli firma ödemeleri ve personel/finans ödemeleri eklenir. Banka, kart ve havale ile yapılan firma ödemeleri nakit çıkışı sayılmaz. Cüzdan ve banka hareketleri para transferi olabildiği için gelir-gidere tekrar eklenmez; güncel para konumu olarak `cash_balance` ve `bank_balance` alanlarında gösterilir.
 - Para analizi `employee_advances` alanı seçilen ay içindeki personel avanslarını gösterir. Müşteri cari tablosu yoksa `customer_receivables`, POS bekleyen tahsilat için ayrı kayıt yoksa `pending_pos` sıfır döner.
 - Net: `gelir - gider`
+
+### Ürün görselleri
+
+Ürün oluşturma/güncelleme `image_url` alanı artık doğrudan görsel adresini indirir,
+JPEG/PNG/GIF/WebP içeriğini doğrular (en fazla 5 MB / 25 milyon piksel) ve dosyayı
+sunucuda saklar. Başarısız indirme ürün kaydını değiştirmez. Görsel ve favori
+alanları gönderilmezse güncellemede mevcut değerleri korunur.
+
+Varsayılan klasör çalışma dizinine göre `uploads/products` olur. İstenirse systemd
+ortamında `PRODUCT_IMAGE_DIR=/home/ubuntu/zeytinerp-backend/uploads/products`
+ile sabitlenebilir. Servis kullanıcısının bu klasöre yazma izni olmalı; klasör
+kalıcı tutulmalı ve veritabanıyla birlikte yedeklenmelidir.
+
+Kaydedilen adres `/api/uploads/products/<icerik-ozeti>.<uzanti>` biçimindedir.
+Mevcut `/api` reverse proxy üzerinden sunulur; ayrıca Nginx `/uploads` kuralı
+gerekmez. Bu ürün görselleri herkese açık okunabilir; faturalar bu yola dahil değildir.
+Backend güncellenip yeniden başlatıldıktan sonra POS frontend de yeniden derlenmelidir.
+Daha önce sessizce kaybolmuş görseller için URL yeniden girilip ürün kaydedilmelidir.

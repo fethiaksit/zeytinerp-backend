@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -27,7 +30,13 @@ func TestProductFavoriteEndpointAddsAndRemovesFavorite(t *testing.T) {
 		t.Fatalf("migrate db: %v", err)
 	}
 
-	product := models.Product{Name: "Canga", IsActive: true}
+	dir := t.TempDir()
+	t.Setenv("PRODUCT_IMAGE_DIR", dir)
+	name := strings.Repeat("a", 64) + ".jpg"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("cached image"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	product := models.Product{Name: "Canga", IsActive: true, ImageURL: "/api/uploads/products/" + name}
 	if err := db.Create(&product).Error; err != nil {
 		t.Fatalf("create product: %v", err)
 	}

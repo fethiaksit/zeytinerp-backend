@@ -23,12 +23,16 @@ type productRequest struct {
 	PurchasePrice decimal.Decimal `json:"purchase_price"`
 	SalePrice     decimal.Decimal `json:"sale_price"`
 	CriticalStock decimal.Decimal `json:"critical_stock"`
+	ImageURL      *string         `json:"image_url"`
+	IsBestseller  *bool           `json:"is_bestseller"`
 	IsActive      *bool           `json:"is_active"`
 }
 
 type productFavoriteRequest struct {
 	IsFavorite bool `json:"isFavorite"`
 }
+
+var errFavoriteImage = errors.New("Favori ürün için sunucuya kaydedilmiş bir ürün görseli gereklidir.")
 
 var errFavoriteLimit = errors.New("En fazla 10 favori ürün seçebilirsiniz.")
 
@@ -104,7 +108,14 @@ func (h *ProductHandler) Create(c *gin.Context) {
 		fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.DB.Create(&product).Error; err != nil {
+	if !h.prepareProductImage(c, req, &product) {
+		return
+	}
+	if err := h.saveProduct(&product, false); err != nil {
+		if errors.Is(err, errFavoriteLimit) {
+			fail(c, http.StatusConflict, err.Error())
+			return
+		}
 		handleDBError(c, err)
 		return
 	}
@@ -322,7 +333,19 @@ func (h *ProductHandler) Update(c *gin.Context) {
 	}
 	product.ID = existing.ID
 	product.CreatedAt = existing.CreatedAt
-	if err := h.DB.Save(&product).Error; err != nil {
+	product.ImageURL = existing.ImageURL
+	product.Brand = existing.Brand
+	product.Description = existing.Description
+	product.IsBestseller = existing.IsBestseller
+	product.BestsellerOrder = existing.BestsellerOrder
+	if !h.prepareProductImage(c, req, &product) {
+		return
+	}
+	if err := h.saveProduct(&product, existing.IsBestseller); err != nil {
+		if errors.Is(err, errFavoriteLimit) {
+			fail(c, http.StatusConflict, err.Error())
+			return
+		}
 		handleDBError(c, err)
 		return
 	}
@@ -353,7 +376,7 @@ func (h *ProductHandler) ToggleFavorite(c *gin.Context) {
 		}
 
 		if req.IsFavorite {
-			if product.IsBestseller {
+			if product.IsBestseller && product.ImageURL != "" {
 				return nil
 			}
 
@@ -366,6 +389,13 @@ func (h *ProductHandler) ToggleFavorite(c *gin.Context) {
 			if favoriteCount >= 10 {
 				return errFavoriteLimit
 			}
+			if strings.TrimSpace(product.ImageURL) == "" {
+				return errFavoriteImage
+			}
+			imageURL, err := services.StoreProductImage(c.Request.Context(), product.ImageURL)
+			if err != nil {
+				return errFavoriteImage
+			}
 			var nextOrder int
 			if err := tx.Model(&models.Product{}).
 				Select("COALESCE(MAX(bestseller_order), 0)").
@@ -374,6 +404,7 @@ func (h *ProductHandler) ToggleFavorite(c *gin.Context) {
 			}
 
 			return tx.Model(&product).Updates(map[string]interface{}{
+				"image_url":        imageURL,
 				"is_bestseller":    true,
 				"bestseller_order": nextOrder + 1,
 			}).Error
@@ -384,6 +415,10 @@ func (h *ProductHandler) ToggleFavorite(c *gin.Context) {
 			"bestseller_order": 0,
 		}).Error
 	})
+	if errors.Is(err, errFavoriteImage) {
+		fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	if errors.Is(err, errFavoriteLimit) {
 		fail(c, http.StatusConflict, errFavoriteLimit.Error())
 		return
@@ -459,4 +494,69 @@ func (r productRequest) toModel() (models.Product, error) {
 		barcode = &clean
 	}
 	return models.Product{Name: r.Name, Barcode: barcode, Category: r.Category, PurchasePrice: r.PurchasePrice, SalePrice: r.SalePrice, CriticalStock: r.CriticalStock, IsActive: active}, nil
+}
+
+// Omitted image/favorite fields preserve existing values; an explicit empty image removes it.
+func (h *ProductHandler) prepareProductImage(c *gin.Context, req productRequest, product *models.Product) bool {
+	if req.ImageURL != nil {
+		imageURL, err := services.StoreProductImage(c.Request.Context(), *req.ImageURL)
+		if err != nil {
+			fail(c, http.StatusBadRequest, err.Error())
+			return false
+		}
+		product.ImageURL = imageURL
+	}
+	if req.IsBestseller != nil {
+		if *req.IsBestseller && !product.IsBestseller && req.ImageURL == nil {
+			imageURL, err := services.StoreProductImage(c.Request.Context(), product.ImageURL)
+			if err != nil {
+				fail(c, http.StatusBadRequest, err.Error())
+				return false
+			}
+			product.ImageURL = imageURL
+		}
+		product.IsBestseller = *req.IsBestseller
+	}
+	if product.IsBestseller && product.ImageURL == "" {
+		fail(c, http.StatusBadRequest, errFavoriteImage.Error())
+		return false
+	}
+	return true
+}
+
+func (h *ProductHandler) saveProduct(product *models.Product, wasFavorite bool) error {
+	return h.DB.Transaction(func(tx *gorm.DB) error {
+		if product.IsBestseller && !wasFavorite {
+			var count int64
+			if err := tx.Model(&models.Product{}).Where("is_active = ? AND is_bestseller = ?", true, true).Count(&count).Error; err != nil {
+				return err
+			}
+			if count >= 10 {
+				return errFavoriteLimit
+			}
+			var order int
+			if err := tx.Model(&models.Product{}).Select("COALESCE(MAX(bestseller_order), 0)").Scan(&order).Error; err != nil {
+				return err
+			}
+			product.BestsellerOrder = order + 1
+		}
+		if !product.IsBestseller {
+			product.BestsellerOrder = 0
+		}
+		if product.ID == 0 {
+			return tx.Create(product).Error
+		}
+		return tx.Save(product).Error
+	})
+}
+
+func ServeProductImage(c *gin.Context) {
+	path, err := services.ProductImagePath(c.Param("filename"))
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	c.File(path)
 }

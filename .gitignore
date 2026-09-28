@@ -7,3 +7,5 @@ bin/
 ._*
 zeytinerp
 *.before_*
+
+uploads/products/

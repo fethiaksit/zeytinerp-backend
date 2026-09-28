@@ -22,6 +22,7 @@ func SetupRouter(db *gorm.DB, jwtSecret string, corsAllowedOrigins []string) *gi
 
 	public := router.Group("/")
 	public.GET("/health", handlers.Health)
+	public.GET("/api/uploads/products/:filename", handlers.ServeProductImage)
 	public.GET("/uploads/invoices/*filepath", handlers.ServeInvoiceFile)
 	RegisterExchangeRateRoutes(public, db)
 
@@ -80,7 +81,7 @@ func LogRoutes(router *gin.Engine) {
 	})
 	for _, route := range registeredRoutes {
 		visibility := "PROTECTED"
-		if route.Path == "/health" || route.Path == "/api/auth/login" || route.Path == "/api/exchange-rates/latest" || route.Path == "/uploads/invoices/*filepath" || strings.HasPrefix(route.Path, "/api/mobile") {
+		if route.Path == "/api/uploads/products/:filename" || route.Path == "/health" || route.Path == "/api/auth/login" || route.Path == "/api/exchange-rates/latest" || route.Path == "/uploads/invoices/*filepath" || strings.HasPrefix(route.Path, "/api/mobile") {
 			visibility = "PUBLIC"
 		}
 		log.Printf("ROUTE %-9s %-7s %s", visibility, route.Method, route.Path)
