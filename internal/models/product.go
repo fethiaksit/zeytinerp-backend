@@ -14,6 +14,7 @@ type Product struct {
 	Brand           string          `json:"brand" gorm:"default:''"`
 	Description     string          `json:"description" gorm:"default:''"`
 	ImageURL        string          `json:"image_url" gorm:"default:''"`
+	ImageSourceURL  string          `json:"image_source_url" gorm:"default:''"`
 	IsBestseller    bool            `json:"is_bestseller" gorm:"not null;default:false"`
 	BestsellerOrder int             `json:"bestseller_order" gorm:"not null;default:0"`
 	PurchasePrice   decimal.Decimal `json:"purchase_price" gorm:"type:numeric(12,2);not null;default:0"`

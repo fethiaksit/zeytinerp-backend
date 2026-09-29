@@ -31,6 +31,7 @@ type productFavoriteRequest struct {
 }
 
 var errFavoriteLimit = errors.New("En fazla 10 favori ürün seçebilirsiniz.")
+var errFavoriteImage = errors.New("Favoriye eklemek için önce ürün görseli eklemelisiniz.")
 
 type productResponse struct {
 	ID              uint            `json:"id"`
@@ -40,6 +41,7 @@ type productResponse struct {
 	Brand           string          `json:"brand"`
 	Description     string          `json:"description"`
 	ImageURL        string          `json:"image_url"`
+	ImageSourceURL  string          `json:"image_source_url"`
 	IsBestseller    bool            `json:"is_bestseller"`
 	BestsellerOrder int             `json:"bestseller_order"`
 	PurchasePrice   decimal.Decimal `json:"purchase_price"`
@@ -86,7 +88,7 @@ func (h *ProductHandler) toResponse(product models.Product) (productResponse, er
 	return productResponse{
 		ID: product.ID, Name: product.Name, Barcode: product.Barcode,
 		Category: product.Category, Brand: product.Brand, Description: product.Description,
-		ImageURL: product.ImageURL, IsBestseller: product.IsBestseller,
+		ImageURL: product.ImageURL, ImageSourceURL: product.ImageSourceURL, IsBestseller: product.IsBestseller,
 		BestsellerOrder: product.BestsellerOrder, PurchasePrice: product.PurchasePrice,
 		SalePrice: product.SalePrice, CriticalStock: product.CriticalStock, Stock: stock,
 		IsActive: product.IsActive, CreatedAt: product.CreatedAt, UpdatedAt: product.UpdatedAt,
@@ -322,6 +324,12 @@ func (h *ProductHandler) Update(c *gin.Context) {
 	}
 	product.ID = existing.ID
 	product.CreatedAt = existing.CreatedAt
+	product.ImageURL = existing.ImageURL
+	product.ImageSourceURL = existing.ImageSourceURL
+	product.IsBestseller = existing.IsBestseller
+	product.BestsellerOrder = existing.BestsellerOrder
+	product.Brand = existing.Brand
+	product.Description = existing.Description
 	if err := h.DB.Save(&product).Error; err != nil {
 		handleDBError(c, err)
 		return
@@ -353,6 +361,9 @@ func (h *ProductHandler) ToggleFavorite(c *gin.Context) {
 		}
 
 		if req.IsFavorite {
+			if !productImageExists(product.ImageURL) {
+				return errFavoriteImage
+			}
 			if product.IsBestseller {
 				return nil
 			}
@@ -386,6 +397,10 @@ func (h *ProductHandler) ToggleFavorite(c *gin.Context) {
 	})
 	if errors.Is(err, errFavoriteLimit) {
 		fail(c, http.StatusConflict, errFavoriteLimit.Error())
+		return
+	}
+	if errors.Is(err, errFavoriteImage) {
+		fail(c, http.StatusConflict, errFavoriteImage.Error())
 		return
 	}
 	if err != nil {
