@@ -1,0 +1,1 @@
+ALTER TABLE products ADD COLUMN IF NOT EXISTS image_source_url TEXT NOT NULL DEFAULT '';
